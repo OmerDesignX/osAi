@@ -76,6 +76,27 @@ p {
   grid-template-rows: 68px minmax(0, 1fr);
 }
 
+.app.platform-darwin {
+  grid-template-rows: 30px 68px minmax(0, 1fr) 46px;
+}
+
+.app.platform-darwin.statusbar-hidden {
+  grid-template-rows: 30px 68px minmax(0, 1fr);
+}
+
+.mac-titlebar-safe-area {
+  display: none;
+}
+
+.platform-darwin .mac-titlebar-safe-area {
+  display: block;
+  height: 30px;
+  min-height: 30px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  -webkit-app-region: drag;
+}
+
 .app.blue-dark {
   --bg: #07111f;
   --topbar: #081421;
@@ -123,7 +144,7 @@ p {
 }
 
 .platform-darwin .topbar {
-  padding-left: 86px;
+  padding-left: 20px;
 }
 
 .brand {
@@ -1163,6 +1184,10 @@ select:disabled {
   z-index: 80;
   inset: 68px 0 46px;
   background: transparent;
+}
+
+.platform-darwin .overlay {
+  inset: 98px 0 46px;
 }
 
 .settings-panel {

@@ -524,6 +524,7 @@ export function App() {
         (showStatusbar ? "" : " statusbar-hidden")
       }
     >
+      <div className="mac-titlebar-safe-area" aria-hidden="true" />
       <header className="topbar">
         <div className="brand" aria-label="osAi">
           <img src={osAiIcon} alt="" aria-hidden="true" />
