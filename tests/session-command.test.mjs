@@ -184,6 +184,61 @@ test("keeps current, custom, and legacy session locations discoverable", async (
   }
 });
 
+test("moves finished sessions to Trash and protects active sessions", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-delete-session-"));
+  const completedDirectory = path.join(root, "completed");
+  const activeDirectory = path.join(root, "active");
+  const completedId = "33333333-3333-4333-8333-333333333333";
+  const activeId = "44444444-4444-4444-8444-444444444444";
+  await fs.mkdir(completedDirectory);
+  await fs.mkdir(activeDirectory);
+  const state = (id, name, status, directory) => ({
+    schemaVersion: 1,
+    id,
+    name,
+    status,
+    phase: status === "completed" ? "complete" : "fine-tuning",
+    progress: status === "completed" ? 100 : 20,
+    indeterminate: false,
+    message: status,
+    createdAt: new Date().toISOString(),
+    // Deliberately forged: list() must replace this with the scanned folder.
+    sessionDirectory: path.join(root, "not-the-session"),
+    logPath: path.join(root, "not-the-session", "training.log"),
+    command: "osai train",
+    request: { ...base, sessionsRoot: root },
+  });
+  await fs.writeFile(
+    path.join(completedDirectory, "state.json"),
+    JSON.stringify(state(completedId, "completed", "completed")),
+  );
+  await fs.writeFile(
+    path.join(activeDirectory, "state.json"),
+    JSON.stringify(state(activeId, "active", "running")),
+  );
+  const service = new SessionService(root, "unused-worker", async () => ({
+    version: 1,
+    theme: "dark",
+    backendExecutable: "",
+    autoUpdateEnabled: false,
+    sessionsRoot: root,
+    sessionRoots: [],
+  }));
+  const trashed = [];
+  try {
+    await service.remove(completedId, async (directory) => {
+      trashed.push(directory);
+    });
+    assert.deepEqual(trashed, [completedDirectory]);
+    await assert.rejects(
+      service.remove(activeId, async () => undefined),
+      /Stop this training session before deleting it/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("prepares individual JSON and JSONL dataset files for the CLI", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-dataset-file-"));
   const json = path.join(root, "fine-tune.json");

@@ -636,7 +636,13 @@ export function restoreLegacyRequest(
 
 async function readSession(file: string) {
   const state = await readState(file);
-  if (!state || state.request) return state;
+  if (!state) return state;
+  const sessionDirectory = path.dirname(file);
+  // The directory being scanned is authoritative. Never trust editable paths
+  // inside state.json for file operations such as reveal or delete.
+  state.sessionDirectory = sessionDirectory;
+  state.logPath = path.join(sessionDirectory, "training.log");
+  if (state.request) return state;
   try {
     const job = JSON.parse(
       await fs.readFile(path.join(path.dirname(file), "job.json"), "utf8"),
@@ -962,6 +968,19 @@ export class SessionService {
     const state = (await this.list()).find((item) => item.id === id);
     if (!state) throw new Error("Training session not found");
     return state;
+  }
+
+  async remove(id: string, moveToTrash: (directory: string) => Promise<void>) {
+    const state = await this.find(id);
+    if (activeStatuses.has(state.status))
+      throw new Error("Stop this training session before deleting it");
+    const stateFile = path.join(state.sessionDirectory, "state.json");
+    const stored = await readState(stateFile);
+    if (!stored || stored.id !== id)
+      throw new Error(
+        "The training session changed before it could be deleted",
+      );
+    await moveToTrash(state.sessionDirectory);
   }
 
   async stop(id: string) {

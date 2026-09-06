@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import feather from "feather-icons";
 import type {
   AlignmentType,
@@ -116,6 +117,13 @@ function friendlyTime(value?: string) {
   }).format(new Date(value));
 }
 
+function readableError(error: unknown) {
+  return (error instanceof Error ? error.message : String(error))
+    .replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+}
+
 const defaults: TrainingRequest = {
   sessionsRoot: "",
   modelSource: "official",
@@ -195,7 +203,7 @@ const fallbackPreferences: Preferences = {
 const fallbackUpdate: AppUpdateStatus = {
   state: "disabled",
   message: "Automatic updates are off",
-  currentVersion: "0.1.0",
+  currentVersion: "0.1.2",
 };
 
 const fallbackBackendInstall: BackendInstallStatus = {
@@ -216,6 +224,16 @@ export function App() {
   const [backendInstall, setBackendInstall] = useState(fallbackBackendInstall);
   const [update, setUpdate] = useState(fallbackUpdate);
   const [notice, setNotice] = useState("");
+  const [noticeExpanded, setNoticeExpanded] = useState(false);
+  const [sessionMenu, setSessionMenu] = useState<{
+    id: string;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<SessionState | null>(
+    null,
+  );
+  const [deletingSession, setDeletingSession] = useState(false);
   const [starting, setStarting] = useState(false);
   const [sessionControl, setSessionControl] = useState<
     "" | "pausing" | "resuming" | "stopping"
@@ -231,6 +249,9 @@ export function App() {
   );
   const active = sessions.find((session) =>
     ["queued", "running", "paused", "stopping"].includes(session.status),
+  );
+  const sessionMenuSession = sessions.find(
+    (session) => session.id === sessionMenu?.id,
   );
 
   const refreshSessions = useCallback(async () => {
@@ -266,9 +287,7 @@ export function App() {
       refreshBackend(),
       window.osai.backendInstallStatus().then(setBackendInstall),
       window.osai.appUpdateStatus().then(setUpdate),
-    ]).catch((error) =>
-      setNotice(error instanceof Error ? error.message : String(error)),
-    );
+    ]).catch((error) => setNotice(readableError(error)));
     const removeUpdateListener = window.osai.onAppUpdateStatus(setUpdate);
     const removeBackendInstallListener = window.osai.onBackendInstallStatus(
       (status) => {
@@ -293,6 +312,30 @@ export function App() {
     const interval = window.setInterval(() => void refreshBackend(), 2_500);
     return () => window.clearInterval(interval);
   }, [backend?.available, refreshBackend]);
+
+  useEffect(() => setNoticeExpanded(false), [notice]);
+
+  useEffect(() => {
+    if (!sessionMenu) return;
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(".session-tab-menu, .session-tab-more")
+      )
+        return;
+      setSessionMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSessionMenu(null);
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [sessionMenu]);
 
   useEffect(() => {
     if (!selected?.request) return;
@@ -392,7 +435,7 @@ export function App() {
       setSelectedId(session.id);
       await refreshSessions();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(readableError(error));
     } finally {
       setStarting(false);
     }
@@ -405,7 +448,7 @@ export function App() {
       await window.osai.stopTraining(id);
       await refreshSessions();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(readableError(error));
     } finally {
       setSessionControl("");
     }
@@ -418,7 +461,7 @@ export function App() {
       await window.osai.pauseTraining(id);
       await refreshSessions();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(readableError(error));
     } finally {
       setSessionControl("");
     }
@@ -431,9 +474,47 @@ export function App() {
       await window.osai.resumeTraining(id);
       await refreshSessions();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(readableError(error));
     } finally {
       setSessionControl("");
+    }
+  };
+
+  const toggleSessionMenu = (id: string, button: HTMLButtonElement) => {
+    if (sessionMenu?.id === id) {
+      setSessionMenu(null);
+      return;
+    }
+    const bounds = button.getBoundingClientRect();
+    const width = 174;
+    const height = 58;
+    const left = Math.min(
+      window.innerWidth - width - 12,
+      Math.max(12, bounds.right - width),
+    );
+    const below = bounds.bottom + 8;
+    setSessionMenu({
+      id,
+      left,
+      top:
+        below + height <= window.innerHeight - 12
+          ? below
+          : Math.max(12, bounds.top - height - 8),
+    });
+  };
+
+  const deleteSession = async () => {
+    if (!deleteCandidate) return;
+    setDeletingSession(true);
+    setNotice("");
+    try {
+      await window.osai.deleteSession(deleteCandidate.id);
+      setDeleteCandidate(null);
+      await refreshSessions();
+    } catch (error) {
+      setNotice(readableError(error));
+    } finally {
+      setDeletingSession(false);
     }
   };
 
@@ -450,7 +531,7 @@ export function App() {
             : await window.osai.checkForAppUpdate();
       setUpdate(next);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(readableError(error));
     }
   };
 
@@ -464,7 +545,7 @@ export function App() {
       setPreferences(nextPreferences);
       await refreshBackend();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice(readableError(error));
     }
   };
 
@@ -541,8 +622,21 @@ export function App() {
           {notice && (
             <div className="top-status notification" role="status">
               <Icon name="alert-circle" />
-              <span>{notice}</span>
-              <button onClick={() => setNotice("")} aria-label="Dismiss">
+              <button
+                type="button"
+                className="notice-message"
+                title={notice}
+                aria-label="Show complete error"
+                onClick={() => setNoticeExpanded(true)}
+              >
+                <span>{notice}</span>
+              </button>
+              <button
+                type="button"
+                className="notice-dismiss"
+                onClick={() => setNotice("")}
+                aria-label="Dismiss error"
+              >
                 <Icon name="x" />
               </button>
             </div>
@@ -1450,25 +1544,83 @@ export function App() {
             {sessions.length > 0 && (
               <div className="session-tabs" role="tablist">
                 {sessions.slice(0, 6).map((session) => (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={selected?.id === session.id}
+                  <div
                     key={session.id}
                     className={
+                      "session-tab " +
                       (selected?.id === session.id ? "active " : "") +
                       session.status
                     }
-                    onClick={() => setSelectedId(session.id)}
                   >
-                    <span>
-                      <b>{session.name}</b>
-                      <small>{statusLabel(session.status)}</small>
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      className="session-tab-select"
+                      role="tab"
+                      aria-selected={selected?.id === session.id}
+                      onClick={() => {
+                        setSelectedId(session.id);
+                        setSessionMenu(null);
+                      }}
+                    >
+                      <span>
+                        <b>{session.name}</b>
+                        <small>{statusLabel(session.status)}</small>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="session-tab-more"
+                      aria-label={`Options for ${session.name}`}
+                      aria-expanded={sessionMenu?.id === session.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleSessionMenu(session.id, event.currentTarget);
+                      }}
+                    >
+                      <Icon name="more-horizontal" />
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
+
+            {sessionMenu &&
+              sessionMenuSession &&
+              createPortal(
+                <div
+                  className="session-tab-menu"
+                  role="menu"
+                  aria-label={`Options for ${sessionMenuSession.name}`}
+                  style={{ top: sessionMenu.top, left: sessionMenu.left }}
+                >
+                  <button
+                    type="button"
+                    className="danger"
+                    role="menuitem"
+                    disabled={[
+                      "queued",
+                      "running",
+                      "paused",
+                      "stopping",
+                    ].includes(sessionMenuSession.status)}
+                    title={
+                      ["queued", "running", "paused", "stopping"].includes(
+                        sessionMenuSession.status,
+                      )
+                        ? "Stop this session before deleting it"
+                        : "Move this session to Trash"
+                    }
+                    onClick={() => {
+                      setDeleteCandidate(sessionMenuSession);
+                      setSessionMenu(null);
+                    }}
+                  >
+                    <Icon name="trash-2" />
+                    Delete session
+                  </button>
+                </div>,
+                document.querySelector(".app") || document.body,
+              )}
 
             {selected ? (
               <div className="session-detail">
@@ -1610,6 +1762,102 @@ export function App() {
                   : "Setup"}
           </span>
         </footer>
+      )}
+
+      {noticeExpanded && notice && (
+        <div
+          className="app-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) =>
+            event.target === event.currentTarget && setNoticeExpanded(false)
+          }
+        >
+          <section
+            className="app-dialog error-details-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="error-details-title"
+          >
+            <header>
+              <div>
+                <h2 id="error-details-title">Error details</h2>
+                <p>The complete local error is shown below.</p>
+              </div>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close error details"
+                onClick={() => setNoticeExpanded(false)}
+              >
+                <Icon name="x" />
+              </button>
+            </header>
+            <pre>{notice}</pre>
+            <footer>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => setNoticeExpanded(false)}
+              >
+                Close
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {deleteCandidate && (
+        <div
+          className="app-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !deletingSession)
+              setDeleteCandidate(null);
+          }}
+        >
+          <section
+            className="app-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-session-title"
+          >
+            <header>
+              <div>
+                <h2 id="delete-session-title">Delete session?</h2>
+                <p>
+                  “{deleteCandidate.name}” and all of its local outputs will be
+                  moved to Trash.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close"
+                disabled={deletingSession}
+                onClick={() => setDeleteCandidate(null)}
+              >
+                <Icon name="x" />
+              </button>
+            </header>
+            <footer>
+              <button
+                type="button"
+                disabled={deletingSession}
+                onClick={() => setDeleteCandidate(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={deletingSession}
+                onClick={() => void deleteSession()}
+              >
+                {deletingSession ? "Deleting…" : "Delete session"}
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
 
       {settingsOpen && (
