@@ -4,6 +4,8 @@ dist/
 dist-electron/
 release/
 release-assets/
+build/python-runtime/
+build/python-runtime-cache/
 *.tsbuildinfo
 .DS_Store
 *.log

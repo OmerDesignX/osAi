@@ -3,6 +3,7 @@ import feather from "feather-icons";
 import type {
   AlignmentType,
   AppUpdateStatus,
+  BackendInstallStatus,
   BackendStatus,
   LoraTargetModule,
   Preferences,
@@ -197,6 +198,11 @@ const fallbackUpdate: AppUpdateStatus = {
   currentVersion: "0.1.0",
 };
 
+const fallbackBackendInstall: BackendInstallStatus = {
+  state: "idle",
+  message: "osAi CLI is not installed",
+};
+
 export function App() {
   const [preferences, setPreferences] = useState(fallbackPreferences);
   const [form, setForm] = useState(defaults);
@@ -207,6 +213,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState("");
   const [log, setLog] = useState("");
   const [backend, setBackend] = useState<BackendStatus | null>(null);
+  const [backendInstall, setBackendInstall] = useState(fallbackBackendInstall);
   const [update, setUpdate] = useState(fallbackUpdate);
   const [notice, setNotice] = useState("");
   const [starting, setStarting] = useState(false);
@@ -257,15 +264,27 @@ export function App() {
       }),
       refreshSessions(),
       refreshBackend(),
+      window.osai.backendInstallStatus().then(setBackendInstall),
       window.osai.appUpdateStatus().then(setUpdate),
     ]).catch((error) =>
       setNotice(error instanceof Error ? error.message : String(error)),
     );
     const removeUpdateListener = window.osai.onAppUpdateStatus(setUpdate);
+    const removeBackendInstallListener = window.osai.onBackendInstallStatus(
+      (status) => {
+        setBackendInstall(status);
+        if (status.state === "error") setNotice(status.message);
+        if (status.state === "ready") {
+          void window.osai.loadPreferences().then(setPreferences);
+          void refreshBackend();
+        }
+      },
+    );
     const interval = window.setInterval(() => void refreshSessions(), 1_200);
     return () => {
       window.clearInterval(interval);
       removeUpdateListener();
+      removeBackendInstallListener();
     };
   }, [refreshBackend, refreshSessions]);
 
@@ -438,8 +457,12 @@ export function App() {
   const downloadBackend = async () => {
     setNotice("");
     try {
-      await window.osai.openBackendDownload();
-      window.setTimeout(() => void refreshBackend(), 1_500);
+      const installed = await window.osai.installBackend();
+      setBackendInstall(installed);
+      if (installed.state === "error") throw new Error(installed.message);
+      const nextPreferences = await window.osai.loadPreferences();
+      setPreferences(nextPreferences);
+      await refreshBackend();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     }
@@ -464,23 +487,30 @@ export function App() {
                 : update.state === "current"
                   ? "Ready"
                   : "Download";
-  const updateIcon: IconName =
-    update.state === "checking" || update.state === "downloading"
-      ? "loader"
-      : update.state === "ready"
-        ? "download-cloud"
-        : update.state === "available"
-          ? "refresh-cw"
-          : update.state === "installing"
-            ? "external-link"
-            : update.state === "error"
-              ? "alert-circle"
-              : "download";
-
   const stage = form.stage;
   const needsFineTune = stage !== "alignment";
   const needsAlignment = stage !== "fine-tuning";
   const backendReady = backend?.available === true;
+  const backendInstallBusy = [
+    "preparing-python",
+    "downloading",
+    "extracting",
+    "installing",
+  ].includes(backendInstall.state);
+  const backendInstallLabel =
+    backendInstall.state === "preparing-python"
+      ? "Preparing Python…"
+      : backendInstall.state === "downloading"
+        ? typeof backendInstall.percent === "number"
+          ? `Downloading · ${backendInstall.percent}%`
+          : "Downloading…"
+        : backendInstall.state === "extracting"
+          ? "Extracting…"
+          : backendInstall.state === "installing"
+            ? "Installing packages…"
+            : backendInstall.state === "error"
+              ? "Try installation again"
+              : "Install osAi";
   const showStatusbar =
     !active || selected?.id !== active.id || settingsOpen || !backendReady;
 
@@ -519,26 +549,12 @@ export function App() {
         </div>
 
         <nav className="topbar-actions" aria-label="Application">
-          <button className="top-action active" aria-current="page">
-            <Icon name="sliders" />
-            Train
-          </button>
           <button
             className="top-action"
             onClick={() => void window.osai.openSessionsFolder()}
           >
             <Icon name="archive" />
             Sessions
-          </button>
-          <button
-            className={`top-action app-update-action ${update.state}`}
-            onClick={() => void runUpdateAction()}
-            disabled={updateBusy}
-            title={update.message}
-            aria-label={`${updateLabel}. ${update.message}`}
-          >
-            <Icon name={updateIcon} />
-            {updateLabel}
           </button>
           <button
             className={"top-action " + (settingsOpen ? "active" : "")}
@@ -1508,22 +1524,28 @@ export function App() {
             <img src={osAiIcon} alt="" aria-hidden="true" />
             <h1>Set up osAi</h1>
             <p>
-              Download the local osAi CLI to start fine-tuning and alignment on
-              this computer.
+              Install the complete osAi CLI repository and its Python packages
+              for this computer.
             </p>
             <button
               className="primary-button onboarding-download"
-              disabled={backend === null}
+              disabled={backend === null || backendInstallBusy}
               onClick={() => void downloadBackend()}
             >
-              <Icon name={backend === null ? "loader" : "download"} />
-              {backend === null ? "Checking setup…" : "Download to start"}
+              <Icon
+                name={
+                  backend === null || backendInstallBusy ? "loader" : "download"
+                }
+              />
+              {backend === null ? "Checking setup…" : backendInstallLabel}
             </button>
             <div className="onboarding-state">
               <span>
                 {backend === null
                   ? "Looking for an existing osAi CLI installation"
-                  : "The training workspace opens automatically after installation"}
+                  : backendInstall.state === "idle"
+                    ? "The training workspace opens automatically when setup finishes"
+                    : backendInstall.message}
               </span>
             </div>
           </section>
@@ -1534,7 +1556,13 @@ export function App() {
         <footer
           className={
             "statusbar " +
-            (active ? "active" : backendReady ? "idle" : "setup-needed")
+            (active
+              ? "active"
+              : backendReady
+                ? "idle"
+                : backendInstallBusy
+                  ? "installing"
+                  : "setup-needed")
           }
         >
           <div className="progress-copy">
@@ -1548,14 +1576,26 @@ export function App() {
                   ? "Ready"
                   : backend === null
                     ? "Checking osAi CLI"
-                    : "Download osAi CLI to start"}
+                    : backendInstall.message}
             </span>
           </div>
           <div className="status-track">
             <span
-              className={active?.indeterminate ? "indeterminate" : ""}
+              className={
+                active?.indeterminate ||
+                (backendInstallBusy &&
+                  typeof backendInstall.percent !== "number")
+                  ? "indeterminate"
+                  : ""
+              }
               style={{
-                width: (active ? Math.max(2, active.progress) : 0) + "%",
+                width:
+                  (active
+                    ? Math.max(2, active.progress)
+                    : backendInstallBusy &&
+                        typeof backendInstall.percent === "number"
+                      ? Math.max(2, backendInstall.percent)
+                      : 0) + "%",
               }}
             />
           </div>
@@ -1564,7 +1604,9 @@ export function App() {
               ? Math.round(active.progress) + "%"
               : backendReady
                 ? "Local"
-                : "Setup"}
+                : typeof backendInstall.percent === "number"
+                  ? `${backendInstall.percent}%`
+                  : "Setup"}
           </span>
         </footer>
       )}
@@ -1668,10 +1710,11 @@ export function App() {
                 </button>
                 <button
                   className="quiet-button"
-                  onClick={() => void window.osai.openBackendDownload()}
+                  disabled={backendInstallBusy}
+                  onClick={() => void downloadBackend()}
                 >
-                  <Icon name="download" />
-                  Download CLI
+                  <Icon name={backendInstallBusy ? "loader" : "download"} />
+                  {backendInstallBusy ? "Installing…" : "Install locally"}
                 </button>
               </div>
             </section>
@@ -1719,7 +1762,8 @@ export function App() {
 
             <p className="settings-footnote">
               Training, rollout generation and alignment run locally. Network
-              access is used only for app updates and optional model downloads.
+              access is used only for initial setup, app updates and optional
+              model downloads.
             </p>
           </aside>
         </div>

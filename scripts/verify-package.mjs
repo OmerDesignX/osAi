@@ -77,11 +77,20 @@ if (platform === "macos") {
     const application = path.join(mountPoint, "osAi.app");
     const executable = path.join(application, "Contents", "MacOS", "osAi");
     const archive = path.join(application, "Contents", "Resources", "app.asar");
+    const python = path.join(
+      application,
+      "Contents",
+      "Resources",
+      "python",
+      "bin",
+      "python3",
+    );
     // Electron's macOS launcher is intentionally small; the application code
     // lives in app.asar. Validate both independently instead of applying the
     // Windows/Linux executable-size threshold to the launcher.
     await requireArtifact(executable, 10_000);
     await requireArtifact(archive, 1_000_000);
+    await requireArtifact(python, 1_000_000);
 
     const detected = await run("lipo", ["-archs", executable]);
     const expected = architecture === "x64" ? "x86_64" : "arm64";
@@ -93,6 +102,22 @@ if (platform === "macos") {
           "; expected " +
           expected,
       );
+
+    const pythonArchitecture = await run("lipo", ["-archs", python]);
+    if (
+      pythonArchitecture.split(/\s+/).length !== 1 ||
+      pythonArchitecture !== expected
+    )
+      throw new Error(
+        artifactName +
+          " bundles Python for " +
+          pythonArchitecture +
+          "; expected " +
+          expected,
+      );
+    const pythonVersion = await run(python, ["--version"]);
+    if (!pythonVersion.startsWith("Python 3.12."))
+      throw new Error(artifactName + " bundles unexpected " + pythonVersion);
 
     const minimum = await run("plutil", [
       "-extract",
@@ -113,6 +138,17 @@ if (platform === "macos") {
 } else if (platform === "windows") {
   const artifactName = "osAi-Setup-" + manifest.version + ".exe";
   await requireArtifact(path.join(packageDirectory, artifactName), 50_000_000);
+  const python = path.join(
+    packageDirectory,
+    "win-unpacked",
+    "resources",
+    "python",
+    "python.exe",
+  );
+  await requireArtifact(python, 1_000_000);
+  const pythonVersion = await run(python, ["--version"]);
+  if (!pythonVersion.startsWith("Python 3.12."))
+    throw new Error(artifactName + " bundles unexpected " + pythonVersion);
   console.log("Verified " + artifactName);
 } else if (platform === "linux") {
   const entries = await fs.readdir(packageDirectory);
@@ -120,6 +156,18 @@ if (platform === "macos") {
   if (packages.length !== 1)
     throw new Error("Expected exactly one versioned x64 Linux package");
   await requireArtifact(path.join(packageDirectory, packages[0]), 20_000_000);
+  const python = path.join(
+    packageDirectory,
+    "linux-unpacked",
+    "resources",
+    "python",
+    "bin",
+    "python3",
+  );
+  await requireArtifact(python, 1_000_000);
+  const pythonVersion = await run(python, ["--version"]);
+  if (!pythonVersion.startsWith("Python 3.12."))
+    throw new Error(packages[0] + " bundles unexpected " + pythonVersion);
   console.log("Verified " + packages[0]);
 } else {
   throw new Error(

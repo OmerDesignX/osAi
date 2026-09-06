@@ -13,7 +13,7 @@ bash releaseScripts/macos/build.sh
 bash releaseScripts/linux/build.sh
 ```
 
-Each script synchronizes the version, installs locked dependencies, checks formatting, runs the tests, verifies the native package, copies the finished installer into `release-assets/<platform>`, and removes the intermediate `release/` directory.
+Each script synchronizes the version, installs locked dependencies, downloads and SHA-256 verifies the pinned CPython runtime for the target architecture, checks formatting, runs the tests, verifies the native package, copies the finished installer into `release-assets/<platform>`, and removes the intermediate `release/` directory.
 
 macOS produces:
 

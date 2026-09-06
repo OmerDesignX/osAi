@@ -11,18 +11,18 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Preferences, TrainingRequest } from "../types.js";
+import { BackendInstaller } from "./backend-installer.js";
 import { readPreferences, writePreferences } from "./preferences.js";
 import { SessionService } from "./session-service.js";
 import { AppUpdateService } from "./updater.js";
 
-const BACKEND_REPOSITORY = "https://github.com/OmerDesignX/osAi-CLI";
-const BACKEND_DOWNLOAD = `${BACKEND_REPOSITORY}/releases`;
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
 let sessionService: SessionService;
 let updateService: AppUpdateService;
+let backendInstaller: BackendInstaller;
 let pendingMacInstaller = "";
 
 function userDataPath(...parts: string[]) {
@@ -32,20 +32,6 @@ function userDataPath(...parts: string[]) {
 function send(channel: string, value: unknown) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send(channel, value);
-}
-
-function trustedGitHubUrl(raw: string) {
-  try {
-    const url = new URL(raw);
-    return (
-      url.protocol === "https:" &&
-      url.hostname === "github.com" &&
-      (url.pathname === "/OmerDesignX/osAi-CLI" ||
-        url.pathname.startsWith("/OmerDesignX/osAi-CLI/"))
-    );
-  } catch {
-    return false;
-  }
 }
 
 const macInstallerHandoffScript = [
@@ -147,8 +133,8 @@ function createMenu() {
       label: "Help",
       submenu: [
         {
-          label: "Get osAi CLI",
-          click: () => void shell.openExternal(BACKEND_DOWNLOAD),
+          label: "Install or repair osAi CLI",
+          click: () => void backendInstaller.install(),
         },
       ],
     },
@@ -228,9 +214,8 @@ function registerIpc() {
     return result.canceled ? "" : result.filePaths[0] || "";
   });
   ipcMain.handle("backend:status", () => sessionService.backendStatus());
-  ipcMain.handle("backend:download", async () => {
-    await shell.openExternal(BACKEND_DOWNLOAD);
-  });
+  ipcMain.handle("backend-install:status", () => backendInstaller.getStatus());
+  ipcMain.handle("backend-install:start", () => backendInstaller.install());
   ipcMain.handle("training:start", (_event, value: unknown) =>
     sessionService.start(value as TrainingRequest),
   );
@@ -284,6 +269,20 @@ app.whenReady().then(async () => {
     userDataPath("sessions"),
     path.join(app.getAppPath(), "dist-electron", "main", "training-worker.js"),
     preferences,
+  );
+  backendInstaller = new BackendInstaller(
+    userDataPath("backend", "installations"),
+    app.isPackaged
+      ? path.join(process.resourcesPath, "python")
+      : path.join(app.getAppPath(), "build", "python-runtime"),
+    (status) => send("backend-install:status-changed", status),
+    async (executable) => {
+      const current = await preferences();
+      await writePreferences(userDataPath("preferences.json"), {
+        ...current,
+        backendExecutable: executable,
+      } satisfies Preferences);
+    },
   );
   updateService = new AppUpdateService(
     userDataPath("updates"),
@@ -342,5 +341,3 @@ app.on("will-quit", () => {
     openMacInstallerAfterExit(installer);
   }
 });
-
-export { trustedGitHubUrl };

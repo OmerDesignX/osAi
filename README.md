@@ -44,8 +44,8 @@ Every completed run publishes both `base-plus-adapter` and a standalone lossless
 ## Install
 
 1. Download the installer for your computer from the [osAi releases](https://github.com/OmerDesignX/osAi-CLI/releases), then open osAi App.
-2. On first launch, press **Download to start** and install the osAi CLI using its hardware-aware setup.
-3. The training workspace opens automatically when the CLI is detected. It supports Python 3.10, 3.11, 3.12, and 3.13 and builds MLX and llama.cpp for the current computer.
+2. On first launch, press **Install osAi**. The App uses its bundled CPython 3.12 runtime to download the complete osAi CLI repository, create a private environment, install the correct packages, and build the local engines automatically.
+3. The training workspace opens automatically when setup finishes. A separate Python installation is not required.
 4. If an existing installation is not found automatically, open **Settings**, select its executable under **osAi backend**, then press **Save and check**.
 
 The backend setup detects the operating system, architecture, macOS version, CUDA toolkit, and Vulkan tools. It selects GPU acceleration first and falls back to CPU when an automatically selected llama.cpp GPU build is unavailable.
@@ -201,9 +201,7 @@ For GGUF, the bundle keeps the original file or split shards unchanged under `mo
 
 | Control                                   | Purpose                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------------------- |
-| **Train**                                 | Return to the training workspace                                            |
 | **Sessions**                              | Open the local sessions directory                                           |
-| **Download / Ready / Update / Install**   | Check for an App update, download it, then open its native installer        |
 | **Settings**                              | Configure appearance, backend connection, and App updates                   |
 | **osCode model / Custom model**           | Choose the model source                                                     |
 | **Small / Medium / Large**                | Choose an official osCode model tier                                        |
@@ -223,11 +221,11 @@ For GGUF, the bundle keeps the original file or split shards unchanged under `mo
 
 ## Settings
 
-Press **Settings** to choose **Gunmetal + blue**, **Blue dark**, or **Blue light**; connect the osAi backend; or manage App updates.
+Press **Settings** to choose **Gunmetal + blue**, **Blue dark**, or **Blue light**; install or select the osAi backend; or manage App updates.
 
-The top-bar download button says **Download** before its first manual check, **Ready** when the installed App is current, **Update** when a newer native package is available, and **Install** after its SHA-256-verified download finishes. Press **Install** to close osAi and open the DMG, EXE, or DEB. Enable **Install updates automatically** to perform that handoff automatically after a verified download. The separate **Download CLI** button remains under **osAi backend**.
+App-update checks are available in **Settings**. Press **Install locally** under **osAi backend** to install or repair the complete CLI without opening a browser. Enable **Install updates automatically** to close osAi and open a verified DMG, EXE, or DEB when an App update is ready.
 
-Network access is limited to optional App updates and official model downloads; training data and model outputs are never sent to those services.
+Network access is limited to initial backend setup, optional App updates, and official model downloads; training data and model outputs are never sent to those services.
 
 ## Build release installers
 
@@ -248,4 +246,4 @@ Verified unsigned installers are written to `release-assets/macos`, `release-ass
 
 ## License
 
-osAi is Apache-2.0 licensed. The osAi backend, vendored projects, and downloaded models retain their own licenses.
+osAi is Apache-2.0 licensed. The bundled CPython runtime, osAi backend, vendored projects, and downloaded models retain their own licenses.

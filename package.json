@@ -63,6 +63,15 @@
       "dist-electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "build/python-runtime",
+        "to": "python",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "mac": {
       "icon": "build/icon-macos.icns",
       "minimumSystemVersion": "12.0",

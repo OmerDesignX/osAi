@@ -149,6 +149,21 @@ export type BackendStatus = {
   message: string;
 };
 
+export type BackendInstallStatus = {
+  state:
+    | "idle"
+    | "preparing-python"
+    | "downloading"
+    | "extracting"
+    | "installing"
+    | "ready"
+    | "error";
+  message: string;
+  percent?: number;
+  executable?: string;
+  sourceDirectory?: string;
+};
+
 export type AppUpdateStatus = {
   state:
     | "disabled"
@@ -177,7 +192,8 @@ export type OsAiBridge = {
   chooseFile(title: string): Promise<string>;
   chooseBackend(): Promise<string>;
   backendStatus(): Promise<BackendStatus>;
-  openBackendDownload(): Promise<void>;
+  backendInstallStatus(): Promise<BackendInstallStatus>;
+  installBackend(): Promise<BackendInstallStatus>;
   startTraining(value: TrainingRequest): Promise<SessionState>;
   pauseTraining(id: string): Promise<SessionState>;
   resumeTraining(id: string): Promise<SessionState>;
@@ -192,4 +208,7 @@ export type OsAiBridge = {
   downloadAppUpdate(): Promise<AppUpdateStatus>;
   installAppUpdate(): Promise<AppUpdateStatus>;
   onAppUpdateStatus(callback: (status: AppUpdateStatus) => void): () => void;
+  onBackendInstallStatus(
+    callback: (status: BackendInstallStatus) => void,
+  ): () => void;
 };

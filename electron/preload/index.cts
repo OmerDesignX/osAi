@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppUpdateStatus,
+  BackendInstallStatus,
   OsAiBridge,
   Preferences,
   TrainingRequest,
@@ -19,7 +20,8 @@ const bridge: OsAiBridge = {
     ipcRenderer.invoke("dialog:choose-file", title),
   chooseBackend: () => ipcRenderer.invoke("dialog:choose-backend"),
   backendStatus: () => ipcRenderer.invoke("backend:status"),
-  openBackendDownload: () => ipcRenderer.invoke("backend:download"),
+  backendInstallStatus: () => ipcRenderer.invoke("backend-install:status"),
+  installBackend: () => ipcRenderer.invoke("backend-install:start"),
   startTraining: (value: TrainingRequest) =>
     ipcRenderer.invoke("training:start", value),
   pauseTraining: (id: string) => ipcRenderer.invoke("training:pause", id),
@@ -40,6 +42,15 @@ const bridge: OsAiBridge = {
       callback(status);
     ipcRenderer.on("updates:status-changed", listener);
     return () => ipcRenderer.removeListener("updates:status-changed", listener);
+  },
+  onBackendInstallStatus: (
+    callback: (status: BackendInstallStatus) => void,
+  ) => {
+    const listener = (_event: unknown, status: BackendInstallStatus) =>
+      callback(status);
+    ipcRenderer.on("backend-install:status-changed", listener);
+    return () =>
+      ipcRenderer.removeListener("backend-install:status-changed", listener);
   },
 };
 
