@@ -1,0 +1,9 @@
+node_modules/
+.pnpm-store/
+dist/
+dist-electron/
+release/
+release-assets/
+*.tsbuildinfo
+.DS_Store
+*.log

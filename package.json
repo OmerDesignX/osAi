@@ -1,0 +1,104 @@
+{
+  "name": "osai-app",
+  "version": "0.1.0",
+  "description": "A local desktop training controller for osAi",
+  "main": "dist-electron/main/index.js",
+  "author": "osAi contributors",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"npm:dev:electron\"",
+    "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "build": "tsc -b && vite build && electron-builder --publish never",
+    "build:dir": "tsc -b && vite build && electron-builder --dir --publish never",
+    "release:clean": "node releaseScripts/common/cleanup-release.mjs",
+    "release:check-disk": "node scripts/check-release-disk.mjs",
+    "release:build:macos": "node scripts/build-macos-release.mjs",
+    "release:stage:macos": "node scripts/stage-native-release.mjs macos",
+    "release:stage:windows": "node scripts/stage-windows-release.mjs",
+    "release:stage:linux": "node scripts/stage-linux-release.mjs",
+    "typecheck": "tsc -b --pretty false",
+    "test": "tsc -b --pretty false && node --test tests/*.test.mjs",
+    "format": "prettier --write . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource/fira-code": "^5.1.1",
+    "@fontsource/manrope": "^5.1.1",
+    "@fontsource/playfair-display": "^5.1.1",
+    "feather-icons": "^4.29.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/feather-icons": "^4.29.4",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.3",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.12",
+    "prettier": "^3.9.6",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.1",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "studio.osai.trainer",
+    "productName": "osAi",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "build/icon-macos.icns",
+      "minimumSystemVersion": "12.0",
+      "artifactName": "osAi-${version}-mac-${arch}.${ext}",
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "artifactName": "osAi-Setup-${version}.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "artifactName": "osAi-${version}-${arch}.${ext}",
+      "target": [
+        "deb"
+      ],
+      "category": "Development",
+      "synopsis": "Local quantized-model training",
+      "executableName": "osai-app",
+      "maintainer": "osAi contributors <noreply@github.com>"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "differentialPackage": false
+    }
+  }
+}

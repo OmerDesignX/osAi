@@ -1,0 +1,13 @@
+packages:
+  - "."
+
+allowBuilds:
+  core-js: false
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+
+onlyBuiltDependencies:
+  - electron
+  - electron-winstaller
+  - esbuild
