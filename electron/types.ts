@@ -29,9 +29,12 @@ export type Preferences = {
   theme: Theme;
   backendExecutable: string;
   autoUpdateEnabled: boolean;
+  sessionsRoot: string;
+  sessionRoots: string[];
 };
 
 export type TrainingRequest = {
+  sessionsRoot: string;
   modelSource: "official" | "custom";
   tier: "small" | "medium" | "large";
   customModelFolder: string;
@@ -93,6 +96,8 @@ export type WorkerJob = {
   statePath: string;
   logPath: string;
   stopPath: string;
+  pausePath?: string;
+  resumePath?: string;
   stage: TrainingStage;
   iterations: number;
   alignmentIterations: number;
@@ -100,7 +105,13 @@ export type WorkerJob = {
 };
 
 export type SessionStatus =
-  "queued" | "running" | "stopping" | "completed" | "failed" | "stopped";
+  | "queued"
+  | "running"
+  | "paused"
+  | "stopping"
+  | "completed"
+  | "failed"
+  | "stopped";
 
 export type SessionState = {
   schemaVersion: 1;
@@ -128,6 +139,7 @@ export type SessionState = {
   logPath: string;
   command: string;
   error?: string;
+  request?: Partial<TrainingRequest>;
 };
 
 export type BackendStatus = {
@@ -161,11 +173,14 @@ export type OsAiBridge = {
   loadPreferences(): Promise<Preferences>;
   savePreferences(value: Preferences): Promise<Preferences>;
   chooseDirectory(title: string): Promise<string>;
+  chooseDataset(title: string): Promise<string>;
   chooseFile(title: string): Promise<string>;
   chooseBackend(): Promise<string>;
   backendStatus(): Promise<BackendStatus>;
   openBackendDownload(): Promise<void>;
   startTraining(value: TrainingRequest): Promise<SessionState>;
+  pauseTraining(id: string): Promise<SessionState>;
+  resumeTraining(id: string): Promise<SessionState>;
   stopTraining(id: string): Promise<SessionState>;
   listSessions(): Promise<SessionState[]>;
   sessionLog(id: string): Promise<string>;

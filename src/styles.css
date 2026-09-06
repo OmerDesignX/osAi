@@ -72,6 +72,10 @@ p {
   font-size: 13px;
 }
 
+.app.statusbar-hidden {
+  grid-template-rows: 68px minmax(0, 1fr);
+}
+
 .app.blue-dark {
   --bg: #07111f;
   --topbar: #081421;
@@ -182,10 +186,33 @@ p {
   background: var(--control-fill);
 }
 
-.top-status > span:last-child {
+.top-status > span {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.top-status.notification .icon {
+  color: var(--danger);
+}
+
+.top-status.notification button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--muted);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.top-status.notification button:hover {
+  color: var(--text);
+  background: var(--control-selected);
 }
 
 .topbar-actions {
@@ -273,74 +300,6 @@ p {
   line-height: 0;
 }
 
-.status-dot {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--soft);
-}
-
-.ready .status-dot,
-.completed .status-dot {
-  background: var(--success);
-}
-
-.running .status-dot,
-.queued .status-dot {
-  background: var(--accent);
-}
-
-.failed .status-dot,
-.missing .status-dot,
-.stopped .status-dot {
-  background: var(--danger);
-}
-
-.stopping .status-dot {
-  background: #edbf67;
-}
-
-.notice {
-  position: fixed;
-  z-index: 70;
-  top: 78px;
-  left: 50%;
-  width: min(620px, calc(100vw - 32px));
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  transform: translateX(-50%);
-  color: var(--danger);
-  border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--line));
-  border-radius: 10px;
-  background: var(--panel2);
-  box-shadow: 0 16px 42px var(--shadow);
-}
-
-.notice > span:nth-child(2) {
-  flex: 1;
-  line-height: 1.45;
-}
-
-.notice button {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  color: inherit;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-}
-
-.notice button:hover {
-  background: var(--control-fill);
-}
-
 .workspace {
   min-width: 0;
   min-height: 0;
@@ -410,10 +369,6 @@ p {
   margin-top: 17px;
   color: var(--soft);
   font-size: 12px;
-}
-
-.onboarding-state .status-dot {
-  background: var(--accent);
 }
 
 .training-panel {
@@ -753,8 +708,8 @@ input::placeholder {
   gap: 15px;
 }
 
-.session-name-control {
-  margin-top: -2px;
+.session-controls {
+  gap: 13px;
 }
 
 .advanced-panel {
@@ -876,6 +831,21 @@ select:disabled {
   width: 100%;
 }
 
+.active-run-controls {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.active-run-controls > button {
+  width: 100%;
+}
+
+.active-run-controls > button:only-child {
+  grid-column: 1 / -1;
+}
+
 .session-workspace {
   min-width: 0;
   min-height: 0;
@@ -896,9 +866,6 @@ select:disabled {
 }
 
 .session-toolbar-title,
-.session-toolbar-actions,
-.session-actions,
-.session-state,
 .progress-copy,
 .button-row,
 .settings-title,
@@ -916,10 +883,6 @@ select:disabled {
 
 .session-toolbar-title .icon {
   color: var(--accent);
-}
-
-.session-toolbar-actions {
-  gap: 7px;
 }
 
 .session-tabs {
@@ -1007,14 +970,8 @@ select:disabled {
   min-width: 0;
 }
 
-.session-state {
-  gap: 8px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
 .session-summary h2 {
-  margin-top: 8px;
+  margin-top: 0;
   overflow: hidden;
   font-size: 21px;
   text-overflow: ellipsis;
@@ -1075,11 +1032,6 @@ select:disabled {
   to {
     transform: translateX(310%);
   }
-}
-
-.session-actions {
-  gap: 8px;
-  margin-bottom: 18px;
 }
 
 .session-error {
@@ -1364,20 +1316,6 @@ select:disabled {
 @media (max-width: 1000px) {
   .global-activity {
     overflow: hidden;
-  }
-
-  .top-status {
-    min-width: 44px;
-  }
-
-  .top-status > span:last-child {
-    display: none;
-  }
-
-  .top-status {
-    width: 44px;
-    justify-content: center;
-    padding: 0;
   }
 
   .topbar {

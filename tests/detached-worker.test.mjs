@@ -131,3 +131,71 @@ test("a detached training worker stops only after an explicit stop request", asy
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("a detached training worker pauses, resumes, and then stops", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-pause-"));
+  const worker = path.resolve("dist-electron/main/training-worker.js");
+  const backend = path.resolve("tests/fixtures/fake-backend.mjs");
+  const statePath = path.join(root, "state.json");
+  const jobPath = path.join(root, "job.json");
+  const stopPath = path.join(root, "stop.request");
+  const pausePath = path.join(root, "pause.request");
+  const resumePath = path.join(root, "resume.request");
+  const id = "44444444-4444-4444-8444-444444444444";
+  const now = new Date().toISOString();
+  const state = {
+    schemaVersion: 1,
+    id,
+    name: "pause-test",
+    status: "queued",
+    phase: "preparing",
+    progress: 0,
+    indeterminate: true,
+    message: "queued",
+    createdAt: now,
+    sessionDirectory: root,
+    logPath: path.join(root, "training.log"),
+    command: "node fake-backend.mjs --long",
+  };
+  const job = {
+    schemaVersion: 1,
+    id,
+    executable: process.execPath,
+    args: [backend, "--long"],
+    sessionDirectory: root,
+    statePath,
+    logPath: state.logPath,
+    stopPath,
+    pausePath,
+    resumePath,
+    stage: "fine-tuning",
+    iterations: 2,
+    alignmentIterations: 1,
+    createdAt: now,
+  };
+  await fs.writeFile(statePath, JSON.stringify(state));
+  await fs.writeFile(jobPath, JSON.stringify(job));
+  const processHandle = spawn(process.execPath, [worker, jobPath], {
+    stdio: "ignore",
+  });
+  try {
+    await waitFor(statePath, (value) => value.status === "running");
+    await fs.writeFile(pausePath, "pause\n");
+    const paused = await waitFor(
+      statePath,
+      (value) => value.status === "paused",
+    );
+    assert.equal(paused.indeterminate, false);
+    await fs.writeFile(resumePath, "resume\n");
+    const resumed = await waitFor(
+      statePath,
+      (value) => value.status === "running" && /resumed/i.test(value.message),
+    );
+    assert.match(resumed.message, /resumed/i);
+    await fs.writeFile(stopPath, "stop\n");
+    await waitFor(statePath, (value) => value.status === "stopped");
+  } finally {
+    processHandle.kill("SIGKILL");
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

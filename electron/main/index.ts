@@ -178,6 +178,37 @@ function registerIpc() {
     });
     return result.canceled ? "" : result.filePaths[0] || "";
   });
+  ipcMain.handle("dialog:choose-dataset", async (_event, title: unknown) => {
+    const safeTitle =
+      typeof title === "string" ? title.slice(0, 100) : "Choose a dataset";
+    let properties: Array<"openFile" | "openDirectory"> = [
+      "openFile",
+      "openDirectory",
+    ];
+    if (process.platform !== "darwin") {
+      const choice = await dialog.showMessageBox(mainWindow!, {
+        type: "question",
+        title: safeTitle,
+        message: "Choose a dataset source",
+        detail:
+          "Select one JSON/JSONL file or a folder containing dataset splits.",
+        buttons: ["Choose JSON file", "Choose folder", "Cancel"],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true,
+      });
+      if (choice.response === 2) return "";
+      properties = choice.response === 0 ? ["openFile"] : ["openDirectory"];
+    }
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: safeTitle,
+      properties,
+      filters: properties.includes("openFile")
+        ? [{ name: "JSON datasets", extensions: ["json", "jsonl"] }]
+        : undefined,
+    });
+    return result.canceled ? "" : result.filePaths[0] || "";
+  });
   ipcMain.handle("dialog:choose-file", async (_event, title: unknown) => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: typeof title === "string" ? title.slice(0, 100) : "Choose a file",
@@ -203,6 +234,14 @@ function registerIpc() {
   ipcMain.handle("training:start", (_event, value: unknown) =>
     sessionService.start(value as TrainingRequest),
   );
+  ipcMain.handle("training:pause", (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Invalid training session");
+    return sessionService.pause(id);
+  });
+  ipcMain.handle("training:resume", (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Invalid training session");
+    return sessionService.resume(id);
+  });
   ipcMain.handle("training:stop", (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.stop(id);
@@ -217,8 +256,9 @@ function registerIpc() {
     shell.showItemInFolder((await sessionService.find(id)).sessionDirectory);
   });
   ipcMain.handle("training:open-root", async () => {
-    await fs.mkdir(sessionService.root(), { recursive: true });
-    const error = await shell.openPath(sessionService.root());
+    const root = await sessionService.root();
+    await fs.mkdir(root, { recursive: true });
+    const error = await shell.openPath(root);
     if (error) throw new Error(error);
   });
   ipcMain.handle("updates:status", () => updateService.getStatus());

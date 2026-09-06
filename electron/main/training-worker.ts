@@ -11,6 +11,8 @@ let state: SessionState;
 let job: WorkerJob;
 let child: ChildProcess | null = null;
 let stopping = false;
+let paused = false;
+let pausedIndeterminate = false;
 let finalised = false;
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
 let writeChain = Promise.resolve();
@@ -110,6 +112,99 @@ function lineReader(consume: (line: string) => void) {
   };
 }
 
+async function runWindowsProcessControl(command: "Suspend" | "Resume") {
+  if (!child?.pid) throw new Error("The training process is not running");
+  const control = spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `${command}-Process -Id ${child.pid} -ErrorAction Stop`,
+    ],
+    { windowsHide: true, stdio: "ignore" },
+  );
+  const code = await new Promise<number | null>((resolve, reject) => {
+    control.once("error", reject);
+    control.once("close", resolve);
+  });
+  if (code !== 0)
+    throw new Error(`Windows could not ${command.toLowerCase()} training`);
+}
+
+async function setChildPaused(shouldPause: boolean) {
+  if (!child?.pid) throw new Error("The training process is not running");
+  if (process.platform === "win32") {
+    await runWindowsProcessControl(shouldPause ? "Suspend" : "Resume");
+    return;
+  }
+  const signal = shouldPause ? "SIGSTOP" : "SIGCONT";
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    child.kill(signal);
+  }
+}
+
+async function pauseTraining() {
+  if (paused || stopping || !child?.pid) return;
+  pausedIndeterminate = state.indeterminate;
+  await setChildPaused(true);
+  paused = true;
+  state.status = "paused";
+  state.indeterminate = false;
+  state.message = "Training paused";
+  await scheduleStateWrite(true);
+}
+
+async function resumeTraining() {
+  if (!paused || stopping || !child?.pid) return;
+  await setChildPaused(false);
+  paused = false;
+  state.status = "running";
+  state.indeterminate = pausedIndeterminate;
+  state.message = "Training resumed";
+  await scheduleStateWrite(true);
+}
+
+let checkingControls = false;
+
+async function exists(file: string) {
+  return fs
+    .access(file)
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function checkControlRequests() {
+  if (checkingControls || finalised) return;
+  checkingControls = true;
+  const pausePath =
+    job.pausePath || path.join(job.sessionDirectory, "pause.request");
+  const resumePath =
+    job.resumePath || path.join(job.sessionDirectory, "resume.request");
+  try {
+    if (await exists(job.stopPath)) {
+      await terminateTree();
+      return;
+    }
+    if (await exists(pausePath)) {
+      await fs.rm(pausePath, { force: true });
+      await pauseTraining();
+    }
+    if (await exists(resumePath)) {
+      await fs.rm(resumePath, { force: true });
+      await resumeTraining();
+    }
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : String(error);
+    state.message = "The requested training control could not be applied";
+    await scheduleStateWrite(true);
+  } finally {
+    checkingControls = false;
+  }
+}
+
 async function terminateTree() {
   if (stopping) return;
   stopping = true;
@@ -117,6 +212,10 @@ async function terminateTree() {
   state.message = "Stopping the osAi process";
   await scheduleStateWrite(true);
   if (!child?.pid) return;
+  if (paused) {
+    await setChildPaused(false).catch(() => undefined);
+    paused = false;
+  }
   if (process.platform === "win32") {
     const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
       windowsHide: true,
@@ -209,11 +308,8 @@ async function main() {
     void finish(status, code, error).finally(() => log.end());
   });
   const stopPoll = setInterval(() => {
-    void fs
-      .access(job.stopPath)
-      .then(terminateTree)
-      .catch(() => undefined);
-  }, 600);
+    void checkControlRequests();
+  }, 300);
   stopPoll.unref();
   process.on("SIGTERM", () => void terminateTree());
   process.on("SIGINT", () => void terminateTree());

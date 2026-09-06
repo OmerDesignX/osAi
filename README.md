@@ -56,14 +56,15 @@ The backend setup detects the operating system, architecture, macOS version, CUD
 2. For an osCode model, press **Small**, **Medium**, or **Large**. For a custom model, press the folder button and select its model folder.
 3. Leave **Engine**, **Accelerator**, and **Multi-GPU** on **Auto** for hardware-aware selection, or choose them manually.
 4. Under **Pipeline**, press **Fine-tune**, **Align**, or **Fine-tune + align**.
-5. Press the dataset folder button and select a directory containing `train.jsonl`.
+5. Press the dataset browse button and select either a `.json`/`.jsonl` file or a folder containing `train.jsonl`.
 6. Keep **Fit settings to this hardware** enabled unless manual control is needed.
-7. Optionally turn on **Name this session** and enter a recognizable run name.
-8. Press **Start training**.
+7. Enter a recognizable **Session name**, or leave the suggested name in place.
+8. Choose **Save sessions in** when a different location is needed. The default is `~/osAi/sessions` in the user's home folder.
+9. Press **Start training**.
 
-An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. The active session displays its phase, progress, and live output on the right and in the bottom progress bar.
+While a run is active, **Start training** becomes **Pause training** and **Stop training**. A paused run can be resumed from the same controls. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
 
-Dataset folders contain `train.jsonl` and may also contain `valid.jsonl` and `test.jsonl`. Fine-tuning rows may use `text`, `prompt` with `completion`, or a `messages` list.
+Choose a single `.json` or `.jsonl` dataset file, or a folder containing `train.jsonl` with optional `valid.jsonl` and `test.jsonl` splits. Fine-tuning rows may use `text`, `prompt` with `completion`, or a `messages` list.
 
 ### Pipeline buttons
 

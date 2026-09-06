@@ -116,6 +116,7 @@ function friendlyTime(value?: string) {
 }
 
 const defaults: TrainingRequest = {
+  sessionsRoot: "",
   modelSource: "official",
   tier: "small",
   customModelFolder: "",
@@ -186,6 +187,8 @@ const fallbackPreferences: Preferences = {
   theme: "dark",
   backendExecutable: "",
   autoUpdateEnabled: false,
+  sessionsRoot: "",
+  sessionRoots: [],
 };
 
 const fallbackUpdate: AppUpdateStatus = {
@@ -199,7 +202,6 @@ export function App() {
   const [form, setForm] = useState(defaults);
   const [sameDataset, setSameDataset] = useState(true);
   const [advanced, setAdvanced] = useState(false);
-  const [renameSession, setRenameSession] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -208,6 +210,9 @@ export function App() {
   const [update, setUpdate] = useState(fallbackUpdate);
   const [notice, setNotice] = useState("");
   const [starting, setStarting] = useState(false);
+  const [sessionControl, setSessionControl] = useState<
+    "" | "pausing" | "resuming" | "stopping"
+  >("");
   const logRef = useRef<HTMLPreElement | null>(null);
 
   const selected = useMemo(
@@ -218,7 +223,7 @@ export function App() {
     [selectedId, sessions],
   );
   const active = sessions.find((session) =>
-    ["queued", "running", "stopping"].includes(session.status),
+    ["queued", "running", "paused", "stopping"].includes(session.status),
   );
 
   const refreshSessions = useCallback(async () => {
@@ -228,7 +233,9 @@ export function App() {
       current && next.some((session) => session.id === current)
         ? current
         : next.find((session) =>
-            ["queued", "running", "stopping"].includes(session.status),
+            ["queued", "running", "paused", "stopping"].includes(
+              session.status,
+            ),
           )?.id ||
           next[0]?.id ||
           "",
@@ -241,7 +248,13 @@ export function App() {
 
   useEffect(() => {
     void Promise.all([
-      window.osai.loadPreferences().then(setPreferences),
+      window.osai.loadPreferences().then((value) => {
+        setPreferences(value);
+        setForm((current) => ({
+          ...current,
+          sessionsRoot: current.sessionsRoot || value.sessionsRoot,
+        }));
+      }),
       refreshSessions(),
       refreshBackend(),
       window.osai.appUpdateStatus().then(setUpdate),
@@ -261,6 +274,28 @@ export function App() {
     const interval = window.setInterval(() => void refreshBackend(), 2_500);
     return () => window.clearInterval(interval);
   }, [backend?.available, refreshBackend]);
+
+  useEffect(() => {
+    if (!selected?.request) return;
+    const restored = Object.fromEntries(
+      Object.entries(selected.request).filter(
+        ([, value]) => value !== undefined,
+      ),
+    ) as Partial<TrainingRequest>;
+    setForm({
+      ...defaults,
+      ...restored,
+      targetModules: Array.isArray(selected.request.targetModules)
+        ? selected.request.targetModules
+        : [],
+    });
+    setSameDataset(
+      Boolean(
+        selected.request.stage === "fine-tune-align" &&
+        selected.request.reuseDataset,
+      ),
+    );
+  }, [selected?.id]);
 
   useEffect(() => {
     if (!selected) {
@@ -299,6 +334,11 @@ export function App() {
     if (value) setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const chooseDataset = async (title: string, key: keyof TrainingRequest) => {
+    const value = await window.osai.chooseDataset(title);
+    if (value) setForm((current) => ({ ...current, [key]: value }));
+  };
+
   const chooseAdapter = async () => {
     const value = await window.osai.chooseFile("Choose an osAi adapter");
     if (value) setForm((current) => ({ ...current, adapter: value }));
@@ -316,12 +356,19 @@ export function App() {
         );
       const request = {
         ...form,
+        sessionsRoot: form.sessionsRoot || preferences.sessionsRoot,
         reuseDataset: form.stage === "fine-tune-align" && sameDataset,
         alignmentData:
           form.stage === "fine-tune-align" && sameDataset
             ? form.fineTuneData
             : form.alignmentData,
       };
+      setPreferences(
+        await window.osai.savePreferences({
+          ...preferences,
+          sessionsRoot: request.sessionsRoot,
+        }),
+      );
       const session = await window.osai.startTraining(request);
       setSelectedId(session.id);
       await refreshSessions();
@@ -334,11 +381,40 @@ export function App() {
 
   const stopTraining = async (id: string) => {
     setNotice("");
+    setSessionControl("stopping");
     try {
       await window.osai.stopTraining(id);
       await refreshSessions();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSessionControl("");
+    }
+  };
+
+  const pauseTraining = async (id: string) => {
+    setNotice("");
+    setSessionControl("pausing");
+    try {
+      await window.osai.pauseTraining(id);
+      await refreshSessions();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSessionControl("");
+    }
+  };
+
+  const resumeTraining = async (id: string) => {
+    setNotice("");
+    setSessionControl("resuming");
+    try {
+      await window.osai.resumeTraining(id);
+      await refreshSessions();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSessionControl("");
     }
   };
 
@@ -405,11 +481,17 @@ export function App() {
   const needsFineTune = stage !== "alignment";
   const needsAlignment = stage !== "fine-tuning";
   const backendReady = backend?.available === true;
+  const showStatusbar =
+    !active || selected?.id !== active.id || settingsOpen || !backendReady;
 
   return (
     <div
       className={
-        "app " + preferences.theme + " platform-" + window.osai.platform
+        "app " +
+        preferences.theme +
+        " platform-" +
+        window.osai.platform +
+        (showStatusbar ? "" : " statusbar-hidden")
       }
     >
       <header className="topbar">
@@ -421,23 +503,19 @@ export function App() {
           </div>
         </div>
 
-        <div className="global-activity" aria-live="polite">
-          <div
-            className={
-              "top-status " + (backend?.available ? "ready" : "missing")
-            }
-          >
-            <span className="status-dot" />
-            <span>
-              {active
-                ? active.name + " · " + active.message
-                : backendReady
-                  ? backend.version || "osAi CLI ready"
-                  : backend === null
-                    ? "Checking osAi CLI…"
-                    : "osAi CLI setup needed"}
-            </span>
-          </div>
+        <div
+          className={"global-activity " + (notice ? "has-status" : "")}
+          aria-live="polite"
+        >
+          {notice && (
+            <div className="top-status notification" role="status">
+              <Icon name="alert-circle" />
+              <span>{notice}</span>
+              <button onClick={() => setNotice("")} aria-label="Dismiss">
+                <Icon name="x" />
+              </button>
+            </div>
+          )}
         </div>
 
         <nav className="topbar-actions" aria-label="Application">
@@ -473,16 +551,6 @@ export function App() {
         </nav>
       </header>
 
-      {notice && (
-        <div className="notice" role="alert">
-          <Icon name="alert-circle" />
-          <span>{notice}</span>
-          <button onClick={() => setNotice("")} aria-label="Dismiss">
-            <Icon name="x" />
-          </button>
-        </div>
-      )}
-
       {backendReady ? (
         <main className="workspace">
           <aside className="training-panel">
@@ -494,6 +562,37 @@ export function App() {
             </header>
 
             <div className="training-form">
+              <section className="form-section session-controls">
+                <div className="section-heading">
+                  <h2>Session</h2>
+                  <p>Name this run and choose where its files are saved.</p>
+                </div>
+                <label className="field session-name-control">
+                  <span>Session name</span>
+                  <input
+                    value={form.sessionName}
+                    placeholder={form.tier + "-" + form.stage}
+                    onChange={(event) =>
+                      setForm({ ...form, sessionName: event.target.value })
+                    }
+                  />
+                </label>
+                <PathField
+                  label="Save sessions in"
+                  value={form.sessionsRoot}
+                  placeholder={preferences.sessionsRoot || "osAi/sessions"}
+                  onChange={(sessionsRoot) =>
+                    setForm({ ...form, sessionsRoot })
+                  }
+                  onBrowse={() =>
+                    void chooseDirectory(
+                      "Choose where to save osAi sessions",
+                      "sessionsRoot",
+                    )
+                  }
+                />
+              </section>
+
               <section className="form-section">
                 <div className="section-heading">
                   <h2>Model</h2>
@@ -641,12 +740,12 @@ export function App() {
                   <PathField
                     label="Fine-tuning dataset"
                     value={form.fineTuneData}
-                    placeholder="Folder containing train.jsonl"
+                    placeholder="Dataset folder or JSON file"
                     onChange={(fineTuneData) =>
                       setForm({ ...form, fineTuneData })
                     }
                     onBrowse={() =>
-                      void chooseDirectory(
+                      void chooseDataset(
                         "Choose a fine-tuning dataset",
                         "fineTuneData",
                       )
@@ -673,12 +772,12 @@ export function App() {
                     <PathField
                       label="Alignment dataset"
                       value={form.alignmentData}
-                      placeholder="Folder containing preference or reward train.jsonl"
+                      placeholder="Dataset folder or JSON file"
                       onChange={(alignmentData) =>
                         setForm({ ...form, alignmentData })
                       }
                       onBrowse={() =>
-                        void chooseDirectory(
+                        void chooseDataset(
                           "Choose an alignment dataset",
                           "alignmentData",
                         )
@@ -751,36 +850,6 @@ export function App() {
               )}
 
               <section className="form-section run-controls">
-                <label className="toggle-row compact">
-                  <input
-                    type="checkbox"
-                    checked={renameSession}
-                    onChange={(event) => {
-                      const enabled = event.target.checked;
-                      setRenameSession(enabled);
-                      if (!enabled) setForm({ ...form, sessionName: "" });
-                    }}
-                  />
-                  <span>
-                    <b>Name this session</b>
-                    <small>
-                      Replace the automatic model and pipeline name.
-                    </small>
-                  </span>
-                </label>
-                {renameSession && (
-                  <label className="field session-name-control">
-                    <span>Session name</span>
-                    <input
-                      autoFocus
-                      value={form.sessionName}
-                      placeholder={form.tier + "-" + form.stage}
-                      onChange={(event) =>
-                        setForm({ ...form, sessionName: event.target.value })
-                      }
-                    />
-                  </label>
-                )}
                 <div className="settings-strip">
                   <label className="toggle-row">
                     <input
@@ -1294,14 +1363,62 @@ export function App() {
             </div>
 
             <footer className="panel-footer">
-              <button
-                className="primary-button start-button"
-                disabled={starting}
-                onClick={() => void startTraining()}
-              >
-                <Icon name={starting ? "loader" : "play"} />
-                {starting ? "Starting…" : "Start training"}
-              </button>
+              {active ? (
+                <div className="active-run-controls">
+                  {active.status === "running" && (
+                    <button
+                      className="primary-button"
+                      disabled={Boolean(sessionControl)}
+                      onClick={() => void pauseTraining(active.id)}
+                    >
+                      <Icon
+                        name={sessionControl === "pausing" ? "loader" : "pause"}
+                      />
+                      {sessionControl === "pausing"
+                        ? "Pausing…"
+                        : "Pause training"}
+                    </button>
+                  )}
+                  {active.status === "paused" && (
+                    <button
+                      className="primary-button"
+                      disabled={Boolean(sessionControl)}
+                      onClick={() => void resumeTraining(active.id)}
+                    >
+                      <Icon
+                        name={sessionControl === "resuming" ? "loader" : "play"}
+                      />
+                      {sessionControl === "resuming"
+                        ? "Resuming…"
+                        : "Resume training"}
+                    </button>
+                  )}
+                  <button
+                    className="danger-button"
+                    disabled={
+                      Boolean(sessionControl) || active.status === "stopping"
+                    }
+                    onClick={() => void stopTraining(active.id)}
+                  >
+                    <Icon
+                      name={sessionControl === "stopping" ? "loader" : "square"}
+                    />
+                    {sessionControl === "stopping" ||
+                    active.status === "stopping"
+                      ? "Stopping…"
+                      : "Stop training"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="primary-button start-button"
+                  disabled={starting}
+                  onClick={() => void startTraining()}
+                >
+                  <Icon name={starting ? "loader" : "play"} />
+                  {starting ? "Starting…" : "Start training"}
+                </button>
+              )}
             </footer>
           </aside>
 
@@ -1310,22 +1427,6 @@ export function App() {
               <div className="session-toolbar-title">
                 <Icon name="activity" />
                 <span>Training sessions</span>
-              </div>
-              <div className="session-toolbar-actions">
-                <button
-                  className="icon-button"
-                  onClick={() => void refreshSessions()}
-                  aria-label="Refresh sessions"
-                >
-                  <Icon name="refresh-cw" />
-                </button>
-                <button
-                  className="quiet-button"
-                  onClick={() => void window.osai.openSessionsFolder()}
-                >
-                  <Icon name="folder" />
-                  Open sessions
-                </button>
               </div>
             </header>
 
@@ -1343,7 +1444,6 @@ export function App() {
                     }
                     onClick={() => setSelectedId(session.id)}
                   >
-                    <span className="status-dot" />
                     <span>
                       <b>{session.name}</b>
                       <small>{statusLabel(session.status)}</small>
@@ -1357,10 +1457,6 @@ export function App() {
               <div className="session-detail">
                 <header className="session-summary">
                   <div>
-                    <div className={"session-state " + selected.status}>
-                      <span className="status-dot" />
-                      <span>{statusLabel(selected.status)}</span>
-                    </div>
                     <h2>{selected.name}</h2>
                     <p>
                       {selected.message} · {selected.phase.replace("-", " ")} ·{" "}
@@ -1374,27 +1470,6 @@ export function App() {
                     className={selected.indeterminate ? "indeterminate" : ""}
                     style={{ width: Math.max(2, selected.progress) + "%" }}
                   />
-                </div>
-                <div className="session-actions">
-                  {["queued", "running", "stopping"].includes(
-                    selected.status,
-                  ) && (
-                    <button
-                      className="danger-button"
-                      disabled={selected.status === "stopping"}
-                      onClick={() => void stopTraining(selected.id)}
-                    >
-                      <Icon name="square" />
-                      {selected.status === "stopping" ? "Stopping…" : "Stop"}
-                    </button>
-                  )}
-                  <button
-                    className="quiet-button"
-                    onClick={() => void window.osai.revealSession(selected.id)}
-                  >
-                    <Icon name="folder" />
-                    Show files
-                  </button>
                 </div>
                 {selected.error && (
                   <div className="session-error">
@@ -1445,7 +1520,6 @@ export function App() {
               {backend === null ? "Checking setup…" : "Download to start"}
             </button>
             <div className="onboarding-state">
-              <span className="status-dot" />
               <span>
                 {backend === null
                   ? "Looking for an existing osAi CLI installation"
@@ -1456,42 +1530,44 @@ export function App() {
         </main>
       )}
 
-      <footer
-        className={
-          "statusbar " +
-          (active ? "active" : backendReady ? "idle" : "setup-needed")
-        }
-      >
-        <div className="progress-copy">
-          <Icon
-            name={active ? "activity" : backendReady ? "check" : "download"}
-          />
-          <span>
+      {showStatusbar && (
+        <footer
+          className={
+            "statusbar " +
+            (active ? "active" : backendReady ? "idle" : "setup-needed")
+          }
+        >
+          <div className="progress-copy">
+            <Icon
+              name={active ? "activity" : backendReady ? "check" : "download"}
+            />
+            <span>
+              {active
+                ? active.name + " · " + active.message
+                : backendReady
+                  ? "Ready"
+                  : backend === null
+                    ? "Checking osAi CLI"
+                    : "Download osAi CLI to start"}
+            </span>
+          </div>
+          <div className="status-track">
+            <span
+              className={active?.indeterminate ? "indeterminate" : ""}
+              style={{
+                width: (active ? Math.max(2, active.progress) : 0) + "%",
+              }}
+            />
+          </div>
+          <span className="status-percent">
             {active
-              ? active.name + " · " + active.message
+              ? Math.round(active.progress) + "%"
               : backendReady
-                ? "Ready"
-                : backend === null
-                  ? "Checking osAi CLI"
-                  : "Download osAi CLI to start"}
+                ? "Local"
+                : "Setup"}
           </span>
-        </div>
-        <div className="status-track">
-          <span
-            className={active?.indeterminate ? "indeterminate" : ""}
-            style={{
-              width: (active ? Math.max(2, active.progress) : 0) + "%",
-            }}
-          />
-        </div>
-        <span className="status-percent">
-          {active
-            ? Math.round(active.progress) + "%"
-            : backendReady
-              ? "Local"
-              : "Setup"}
-        </span>
-      </footer>
+        </footer>
+      )}
 
       {settingsOpen && (
         <div
@@ -1546,7 +1622,6 @@ export function App() {
                   "backend-status " + (backend?.available ? "ready" : "missing")
                 }
               >
-                <span className="status-dot" />
                 <div>
                   <b>{backend?.available ? "Connected" : "Not found"}</b>
                   <small>{backend?.message || "Checking the local CLI…"}</small>

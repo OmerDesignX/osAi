@@ -13,6 +13,8 @@ const bridge: OsAiBridge = {
     ipcRenderer.invoke("preferences:set", value),
   chooseDirectory: (title: string) =>
     ipcRenderer.invoke("dialog:choose-directory", title),
+  chooseDataset: (title: string) =>
+    ipcRenderer.invoke("dialog:choose-dataset", title),
   chooseFile: (title: string) =>
     ipcRenderer.invoke("dialog:choose-file", title),
   chooseBackend: () => ipcRenderer.invoke("dialog:choose-backend"),
@@ -20,6 +22,8 @@ const bridge: OsAiBridge = {
   openBackendDownload: () => ipcRenderer.invoke("backend:download"),
   startTraining: (value: TrainingRequest) =>
     ipcRenderer.invoke("training:start", value),
+  pauseTraining: (id: string) => ipcRenderer.invoke("training:pause", id),
+  resumeTraining: (id: string) => ipcRenderer.invoke("training:resume", id),
   stopTraining: (id: string) => ipcRenderer.invoke("training:stop", id),
   listSessions: () => ipcRenderer.invoke("training:list"),
   sessionLog: (id: string) => ipcRenderer.invoke("training:log", id),

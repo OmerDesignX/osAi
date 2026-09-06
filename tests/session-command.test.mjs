@@ -5,10 +5,14 @@ import path from "node:path";
 import test from "node:test";
 import {
   buildOsAiArgs,
+  prepareDatasetSelection,
   prepareSharedFineTuneData,
+  restoreLegacyRequest,
+  SessionService,
 } from "../dist-electron/main/session-service.js";
 
 const base = {
+  sessionsRoot: "",
   modelSource: "official",
   tier: "small",
   customModelFolder: "",
@@ -60,6 +64,181 @@ const base = {
   mainGpu: null,
   devices: "",
 };
+
+test("restores settings from sessions created by earlier app builds", () => {
+  const sessionDirectory = path.join(
+    os.homedir(),
+    "Library",
+    "Application Support",
+    "osai-app",
+    "sessions",
+    "older-run",
+  );
+  const job = {
+    schemaVersion: 1,
+    id: "33333333-3333-3333-3333-333333333333",
+    executable: "osai",
+    args: [
+      "train",
+      "--tier",
+      "small",
+      "--engine",
+      "auto",
+      "--accelerator",
+      "auto",
+      "--stage",
+      "fine-tuning",
+      "--optimizer",
+      "auto",
+      "--multi-gpu",
+      "auto",
+      "--auto-settings",
+      "--data",
+      "/datasets/dolly.jsonl",
+      "--iterations",
+      "3",
+      "--session-name",
+      "dolly-run",
+    ],
+    sessionDirectory,
+    statePath: path.join(sessionDirectory, "state.json"),
+    logPath: path.join(sessionDirectory, "training.log"),
+    stopPath: path.join(sessionDirectory, "stop.request"),
+    stage: "fine-tuning",
+    iterations: 3,
+    alignmentIterations: 10,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+  const restored = restoreLegacyRequest(job, {
+    schemaVersion: 1,
+    id: job.id,
+    name: "dolly-run",
+    status: "completed",
+    phase: "complete",
+    progress: 100,
+    indeterminate: false,
+    message: "Complete",
+    createdAt: job.createdAt,
+    sessionDirectory,
+    logPath: job.logPath,
+    command: "osai train",
+  });
+  assert.equal(restored.sessionsRoot, path.dirname(sessionDirectory));
+  assert.equal(restored.sessionName, "dolly-run");
+  assert.equal(restored.fineTuneData, "/datasets/dolly.jsonl");
+  assert.equal(restored.iterations, 3);
+  assert.equal(restored.autoSettings, true);
+});
+
+test("keeps current, custom, and legacy session locations discoverable", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-session-roots-"));
+  const current = path.join(root, "current");
+  const legacy = path.join(root, "legacy");
+  await fs.mkdir(current);
+  await fs.mkdir(legacy);
+  const makeState = async (sessionsRoot, id, name) => {
+    const directory = path.join(sessionsRoot, name);
+    await fs.mkdir(directory);
+    await fs.writeFile(
+      path.join(directory, "state.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        id,
+        name,
+        status: "completed",
+        phase: "complete",
+        progress: 100,
+        indeterminate: false,
+        message: "Complete",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        sessionDirectory: directory,
+        logPath: path.join(directory, "training.log"),
+        command: "osai train",
+        request: { ...base, sessionsRoot },
+      }),
+    );
+  };
+  await makeState(current, "11111111-1111-1111-1111-111111111111", "new");
+  await makeState(legacy, "22222222-2222-2222-2222-222222222222", "old");
+  const service = new SessionService(legacy, "unused-worker", async () => ({
+    version: 1,
+    theme: "dark",
+    backendExecutable: "",
+    autoUpdateEnabled: false,
+    sessionsRoot: current,
+    sessionRoots: [current],
+  }));
+  try {
+    assert.equal(await service.root(), current);
+    const sessions = await service.list();
+    assert.deepEqual(sessions.map((session) => session.name).sort(), [
+      "new",
+      "old",
+    ]);
+    assert.equal(
+      sessions.find((session) => session.name === "new").request.tier,
+      "small",
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prepares individual JSON and JSONL dataset files for the CLI", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-dataset-file-"));
+  const json = path.join(root, "fine-tune.json");
+  const jsonl = path.join(root, "alignment.jsonl");
+  await fs.writeFile(
+    json,
+    JSON.stringify([
+      { prompt: "One", completion: "First" },
+      { prompt: "Two", completion: "Second" },
+    ]),
+  );
+  await fs.writeFile(
+    jsonl,
+    `${JSON.stringify({ prompt: "One", chosen: "Yes", rejected: "No" })}\n`,
+  );
+  try {
+    const fine = await prepareDatasetSelection(
+      json,
+      path.join(root, "prepared-fine"),
+      "Fine-tuning dataset",
+    );
+    const align = await prepareDatasetSelection(
+      jsonl,
+      path.join(root, "prepared-align"),
+      "Alignment dataset",
+    );
+    assert.equal(
+      await fs.readFile(path.join(fine, "train.jsonl"), "utf8"),
+      '{"prompt":"One","completion":"First"}\n{"prompt":"Two","completion":"Second"}\n',
+    );
+    assert.equal(
+      await fs.readFile(path.join(align, "train.jsonl"), "utf8"),
+      '{"prompt":"One","chosen":"Yes","rejected":"No"}\n',
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("uses an existing dataset directory without copying it", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-dataset-dir-"));
+  try {
+    assert.equal(
+      await prepareDatasetSelection(
+        root,
+        path.join(root, "unused"),
+        "Fine-tuning dataset",
+      ),
+      root,
+    );
+    await assert.rejects(fs.stat(path.join(root, "unused")));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("builds a non-interactive combined osAi command with local rollouts", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-command-"));

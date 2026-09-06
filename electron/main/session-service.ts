@@ -12,7 +12,7 @@ import type {
   WorkerJob,
 } from "../types.js";
 
-const activeStatuses = new Set(["queued", "running", "stopping"]);
+const activeStatuses = new Set(["queued", "running", "paused", "stopping"]);
 const alignmentTypes = new Set([
   "auto",
   "dpo",
@@ -137,6 +137,105 @@ async function assertExistingPath(value: string, label: string) {
   if (!(await fs.stat(value).catch(() => null)))
     throw new Error(`${label} does not exist`);
   return path.resolve(value);
+}
+
+async function ensureSessionsRoot(value: string) {
+  if (!value || !path.isAbsolute(value))
+    throw new Error("Session save location must be an absolute directory path");
+  const root = path.resolve(value);
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  const stat = await fs.stat(root).catch(() => null);
+  if (!stat?.isDirectory())
+    throw new Error("Session save location is not a directory");
+  return root;
+}
+
+async function writeJsonLines(input: string, output: string) {
+  const handle = await fs.open(output, "wx", 0o600);
+  const lines = readline.createInterface({
+    input: createReadStream(input, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+  let rows = 0;
+  let buffer = "";
+  try {
+    for await (const line of lines) {
+      if (!line.trim()) continue;
+      let row: unknown;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        throw new Error(`Invalid JSON in dataset file: ${input}`);
+      }
+      if (!row || typeof row !== "object" || Array.isArray(row))
+        throw new Error(`Dataset rows must be JSON objects: ${input}`);
+      buffer += `${JSON.stringify(row)}\n`;
+      rows += 1;
+      if (buffer.length >= 1024 * 1024) {
+        await handle.write(buffer);
+        buffer = "";
+      }
+    }
+    if (buffer) await handle.write(buffer);
+  } finally {
+    lines.close();
+    await handle.close();
+  }
+  if (rows < 1) throw new Error(`Dataset file is empty: ${input}`);
+}
+
+async function writeJsonDocument(input: string, output: string) {
+  const source = await fs.readFile(input, "utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    await writeJsonLines(input, output);
+    return;
+  }
+  const container = parsed as Record<string, unknown> | null;
+  const records = Array.isArray(parsed)
+    ? parsed
+    : container && Array.isArray(container.train)
+      ? container.train
+      : container && Array.isArray(container.data)
+        ? container.data
+        : [parsed];
+  if (records.length < 1) throw new Error(`Dataset file is empty: ${input}`);
+  const lines = records.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row))
+      throw new Error(`Dataset rows must be JSON objects: ${input}`);
+    return JSON.stringify(row);
+  });
+  await fs.writeFile(output, `${lines.join("\n")}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
+}
+
+export async function prepareDatasetSelection(
+  source: string,
+  destination: string,
+  label = "Dataset",
+) {
+  const selected = await assertExistingPath(source, label);
+  const stat = await fs.stat(selected);
+  if (stat.isDirectory()) return selected;
+  if (
+    !stat.isFile() ||
+    ![".json", ".jsonl"].includes(path.extname(selected).toLowerCase())
+  )
+    throw new Error(`${label} must be a folder or a .json/.jsonl file`);
+  await fs.mkdir(destination, { recursive: false, mode: 0o700 });
+  const output = path.join(destination, "train.jsonl");
+  if (path.extname(selected).toLowerCase() === ".json") {
+    await writeJsonDocument(selected, output);
+  } else {
+    await fs.link(selected, output).catch(async () => {
+      await fs.copyFile(selected, output, fs.constants.COPYFILE_EXCL);
+    });
+  }
+  return destination;
 }
 
 export async function buildOsAiArgs(
@@ -439,10 +538,138 @@ async function readState(file: string) {
   }
 }
 
+function argumentValue(args: string[], flag: string) {
+  const index = args.lastIndexOf(flag);
+  return index >= 0 && index + 1 < args.length ? args[index + 1] : undefined;
+}
+
+function argumentValues(args: string[], flag: string) {
+  return args.filter((_value, index) => args[index - 1] === flag);
+}
+
+function numericArgument(args: string[], flag: string) {
+  const value = Number(argumentValue(args, flag));
+  return Number.isFinite(value) ? value : undefined;
+}
+
+export function restoreLegacyRequest(
+  job: WorkerJob,
+  state: SessionState,
+): Partial<TrainingRequest> {
+  const args = job.args;
+  const custom = argumentValue(args, "--custom");
+  const customRoot = argumentValue(args, "--custom-root");
+  const data = argumentValue(args, "--data") || "";
+  const alignmentData = argumentValue(args, "--alignment-data") || "";
+  const reusedDataset =
+    data.includes(`${path.sep}.shared-fine-tuning`) && Boolean(alignmentData);
+  return {
+    sessionsRoot: path.dirname(state.sessionDirectory),
+    modelSource: custom ? "custom" : "official",
+    tier: (argumentValue(args, "--tier") || "small") as TrainingRequest["tier"],
+    customModelFolder:
+      custom && customRoot ? path.join(customRoot, custom) : "",
+    engine: (argumentValue(args, "--engine") ||
+      "auto") as TrainingRequest["engine"],
+    accelerator: (argumentValue(args, "--accelerator") ||
+      "auto") as TrainingRequest["accelerator"],
+    stage: (argumentValue(args, "--stage") ||
+      job.stage) as TrainingRequest["stage"],
+    fineTuneData: reusedDataset ? alignmentData : data,
+    alignmentData,
+    reuseDataset: reusedDataset,
+    adapter: argumentValue(args, "--adapter") || "",
+    alignmentType: (argumentValue(args, "--alignment-type") ||
+      "auto") as TrainingRequest["alignmentType"],
+    optimizer: (argumentValue(args, "--optimizer") ||
+      "auto") as TrainingRequest["optimizer"],
+    autoSettings: args.includes("--auto-settings"),
+    multiGpu: (argumentValue(args, "--multi-gpu") ||
+      "auto") as TrainingRequest["multiGpu"],
+    liveRollouts: !args.includes("--no-live-rollouts"),
+    sessionName: argumentValue(args, "--session-name") || state.name,
+    iterations: numericArgument(args, "--iterations") || job.iterations,
+    alignmentIterations:
+      numericArgument(args, "--alignment-iterations") ||
+      job.alignmentIterations,
+    batchSize: numericArgument(args, "--batch-size"),
+    gradientAccumulationSteps: numericArgument(
+      args,
+      "--gradient-accumulation-steps",
+    ),
+    gradientCheckpoint: !args.includes("--no-gradient-checkpointing"),
+    maxSeqLength: numericArgument(args, "--max-seq-length"),
+    learningRate: numericArgument(args, "--learning-rate"),
+    alignmentLearningRate: numericArgument(args, "--alignment-learning-rate"),
+    rank: numericArgument(args, "--rank"),
+    scale: numericArgument(args, "--scale"),
+    numLayers: numericArgument(args, "--num-layers"),
+    dropout: numericArgument(args, "--dropout"),
+    seed: numericArgument(args, "--seed"),
+    saveEvery: numericArgument(args, "--save-every"),
+    stepsPerReport: numericArgument(args, "--steps-per-report"),
+    stepsPerEval: numericArgument(args, "--steps-per-eval"),
+    validationBatches: numericArgument(args, "--val-batches"),
+    maskPrompt: !args.includes("--no-mask-prompt"),
+    targetModules: argumentValues(
+      args,
+      "--target-module",
+    ) as TrainingRequest["targetModules"],
+    alignmentBeta: numericArgument(args, "--alignment-beta"),
+    alignmentGamma: numericArgument(args, "--alignment-gamma"),
+    ppoClip: numericArgument(args, "--ppo-clip"),
+    rolloutMaxTokens: numericArgument(args, "--rollout-max-tokens"),
+    rolloutsPerPrompt: numericArgument(args, "--rollouts-per-prompt"),
+    rolloutTemperature: numericArgument(args, "--rollout-temperature"),
+    rolloutTopP: numericArgument(args, "--rollout-top-p"),
+    rolloutSeed: numericArgument(args, "--rollout-seed"),
+    ggufBatchSize: numericArgument(args, "--gguf-batch-size"),
+    ggufThreads: numericArgument(args, "--gguf-threads"),
+    distributedWorkers: numericArgument(args, "--distributed-workers"),
+    splitMode: (argumentValue(args, "--split-mode") ||
+      "auto") as TrainingRequest["splitMode"],
+    tensorSplit: argumentValue(args, "--tensor-split") || "",
+    mainGpu: numericArgument(args, "--main-gpu"),
+    devices: argumentValues(args, "--device").join(", "),
+  };
+}
+
+async function readSession(file: string) {
+  const state = await readState(file);
+  if (!state || state.request) return state;
+  try {
+    const job = JSON.parse(
+      await fs.readFile(path.join(path.dirname(file), "job.json"), "utf8"),
+    ) as WorkerJob;
+    if (job.schemaVersion === 1 && job.id === state.id)
+      state.request = restoreLegacyRequest(job, state);
+  } catch {
+    // Older or externally created sessions can still be displayed without a form.
+  }
+  return state;
+}
+
 async function writePrivateJson(file: string, value: unknown) {
   await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, {
     mode: 0o600,
   });
+}
+
+async function waitForSessionStatus(
+  file: string,
+  expected: SessionState["status"],
+  timeout = 8_000,
+) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    const state = await readState(file);
+    if (state?.status === expected) return state;
+    if (state && !activeStatuses.has(state.status)) return state;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `Training did not ${expected === "paused" ? "pause" : "resume"}`,
+  );
 }
 
 function sharedFineTuneRow(value: unknown, file: string, lineNumber: number) {
@@ -517,7 +744,7 @@ export async function prepareSharedFineTuneData(
 
 export class SessionService {
   constructor(
-    private readonly sessionsRoot: string,
+    private readonly legacySessionsRoot: string,
     private readonly workerScript: string,
     private readonly preferences: () => Promise<Preferences>,
   ) {}
@@ -566,30 +793,52 @@ export class SessionService {
   async start(input: TrainingRequest) {
     const preferences = await this.preferences();
     const executable = preferences.backendExecutable || "osai";
+    const sessionsRoot = await ensureSessionsRoot(
+      input.sessionsRoot || preferences.sessionsRoot,
+    );
     const id = randomUUID();
     const requestedName = cleanName(
       input.sessionName ||
         `${input.modelSource === "custom" ? path.basename(input.customModelFolder || "custom") : input.tier}-${input.stage}`,
     );
     const directory = path.join(
-      this.sessionsRoot,
+      sessionsRoot,
       `${timestamp()}-${requestedName}-${id.slice(0, 8)}`,
     );
-    await fs.mkdir(this.sessionsRoot, { recursive: true, mode: 0o700 });
+    await fs.mkdir(sessionsRoot, { recursive: true, mode: 0o700 });
     await fs.mkdir(directory, { recursive: false, mode: 0o700 });
     let prepared = input;
     let command: Awaited<ReturnType<typeof buildOsAiArgs>>;
     try {
       if (input.stage === "fine-tune-align" && input.reuseDataset) {
-        const shared = await prepareSharedFineTuneData(
+        const sharedSource = await prepareDatasetSelection(
           input.fineTuneData,
+          path.join(directory, ".shared-input"),
+          "Shared training dataset",
+        );
+        const shared = await prepareSharedFineTuneData(
+          sharedSource,
           path.join(directory, ".shared-fine-tuning"),
         );
         prepared = {
           ...input,
           fineTuneData: shared,
-          alignmentData: input.fineTuneData,
+          alignmentData: sharedSource,
         };
+      } else {
+        prepared = { ...input };
+        if (input.stage !== "alignment")
+          prepared.fineTuneData = await prepareDatasetSelection(
+            input.fineTuneData,
+            path.join(directory, ".fine-tune-input"),
+            "Fine-tuning dataset",
+          );
+        if (input.stage !== "fine-tuning")
+          prepared.alignmentData = await prepareDatasetSelection(
+            input.alignmentData,
+            path.join(directory, ".alignment-input"),
+            "Alignment dataset",
+          );
       }
       command = await buildOsAiArgs(prepared, directory);
     } catch (error) {
@@ -606,6 +855,8 @@ export class SessionService {
       statePath: path.join(directory, "state.json"),
       logPath: path.join(directory, "training.log"),
       stopPath: path.join(directory, "stop.request"),
+      pausePath: path.join(directory, "pause.request"),
+      resumePath: path.join(directory, "resume.request"),
       stage: input.stage,
       iterations: input.iterations,
       alignmentIterations: input.alignmentIterations,
@@ -624,6 +875,11 @@ export class SessionService {
       sessionDirectory: directory,
       logPath: job.logPath,
       command: displayCommand(executable, args),
+      request: {
+        ...input,
+        sessionsRoot,
+        sessionName: input.sessionName || sessionName,
+      },
     };
     const jobPath = path.join(directory, "job.json");
     await writePrivateJson(jobPath, job);
@@ -652,17 +908,30 @@ export class SessionService {
   }
 
   async list() {
-    await fs.mkdir(this.sessionsRoot, { recursive: true, mode: 0o700 });
-    const entries = await fs.readdir(this.sessionsRoot, {
-      withFileTypes: true,
-    });
-    const states = await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) =>
-          readState(path.join(this.sessionsRoot, entry.name, "state.json")),
-        ),
-    );
+    const preferences = await this.preferences();
+    const currentRoot = await ensureSessionsRoot(preferences.sessionsRoot);
+    const roots = [
+      ...new Set([
+        currentRoot,
+        ...preferences.sessionRoots
+          .filter(path.isAbsolute)
+          .map((root) => path.resolve(root)),
+        path.resolve(this.legacySessionsRoot),
+      ]),
+    ];
+    const entries = (
+      await Promise.all(
+        roots.map(async (root) => {
+          const children = await fs
+            .readdir(root, { withFileTypes: true })
+            .catch(() => []);
+          return children
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => path.join(root, entry.name, "state.json"));
+        }),
+      )
+    ).flat();
+    const states = await Promise.all(entries.map(readSession));
     const valid = states.filter((state): state is SessionState =>
       Boolean(state?.id),
     );
@@ -715,6 +984,40 @@ export class SessionService {
     return state;
   }
 
+  private async control(id: string, action: "pause" | "resume") {
+    const state = await this.find(id);
+    const required = action === "pause" ? "running" : "paused";
+    if (state.status !== required)
+      throw new Error(
+        action === "pause"
+          ? "Only a running session can be paused"
+          : "Only a paused session can be resumed",
+      );
+    const job = JSON.parse(
+      await fs.readFile(path.join(state.sessionDirectory, "job.json"), "utf8"),
+    ) as WorkerJob;
+    if (!job.pausePath || !job.resumePath)
+      throw new Error(
+        "Pause is available for sessions started by this version of osAi",
+      );
+    const request = action === "pause" ? job.pausePath : job.resumePath;
+    const opposite = action === "pause" ? job.resumePath : job.pausePath;
+    await fs.rm(opposite, { force: true });
+    await fs.writeFile(request, `${action}\n`, { mode: 0o600 });
+    return waitForSessionStatus(
+      path.join(state.sessionDirectory, "state.json"),
+      action === "pause" ? "paused" : "running",
+    );
+  }
+
+  async pause(id: string) {
+    return this.control(id, "pause");
+  }
+
+  async resume(id: string) {
+    return this.control(id, "resume");
+  }
+
   async log(id: string) {
     const state = await this.find(id);
     const handle = await fs.open(state.logPath, "r").catch(() => null);
@@ -730,7 +1033,7 @@ export class SessionService {
     }
   }
 
-  root() {
-    return this.sessionsRoot;
+  async root() {
+    return ensureSessionsRoot((await this.preferences()).sessionsRoot);
   }
 }
