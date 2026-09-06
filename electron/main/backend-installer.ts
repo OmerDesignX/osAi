@@ -3,9 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { BackendInstallStatus } from "../types.js";
 
-const BACKEND_ARCHIVE_URL =
-  "https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/main";
-const MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024;
 const PYTHON_CHECK =
   "import sys; print('.'.join(map(str, sys.version_info[:3]))); " +
   "raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)";
@@ -22,20 +19,6 @@ type CommandResult = {
   stderr: string;
 };
 
-export function isTrustedBackendSourceUrl(raw: string) {
-  try {
-    const url = new URL(raw);
-    return (
-      url.protocol === "https:" &&
-      (url.hostname === "codeload.github.com" ||
-        url.hostname === "github.com" ||
-        url.hostname === "objects.githubusercontent.com")
-    );
-  } catch {
-    return false;
-  }
-}
-
 export function backendExecutablePath(
   venv: string,
   platform = process.platform,
@@ -45,6 +28,21 @@ export function backendExecutablePath(
     platform === "win32" ? "Scripts" : "bin",
     platform === "win32" ? "osai.exe" : "osai",
   );
+}
+
+export function backendBundleTarget(
+  platform = process.platform,
+  architecture = process.arch,
+) {
+  const system =
+    platform === "darwin"
+      ? "macos"
+      : platform === "win32"
+        ? "windows"
+        : platform === "linux"
+          ? "linux"
+          : platform;
+  return `${system}-${architecture}`;
 }
 
 export function bundledPythonExecutable(
@@ -168,60 +166,6 @@ async function verifyBundledPython(
   };
 }
 
-async function downloadArchive(
-  destination: string,
-  update: (downloaded: number, total?: number) => void,
-) {
-  const response = await fetch(BACKEND_ARCHIVE_URL, {
-    redirect: "follow",
-    headers: {
-      Accept: "application/zip",
-      "User-Agent": "osAi-App/0.1.0",
-    },
-  });
-  if (!response.ok || !response.body)
-    throw new Error(`Could not download osAi CLI (${response.status})`);
-  if (!isTrustedBackendSourceUrl(response.url))
-    throw new Error("The osAi CLI download redirected to an untrusted server");
-  const length = Number(response.headers.get("content-length"));
-  const total = Number.isFinite(length) && length > 0 ? length : undefined;
-  if (total && total > MAX_ARCHIVE_BYTES)
-    throw new Error(
-      "The osAi CLI archive is larger than the safe download limit",
-    );
-
-  const handle = await fs.open(destination, "wx", 0o600);
-  const reader = response.body.getReader();
-  let downloaded = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      downloaded += value.byteLength;
-      if (downloaded > MAX_ARCHIVE_BYTES)
-        throw new Error(
-          "The osAi CLI archive exceeded the safe download limit",
-        );
-      let offset = 0;
-      while (offset < value.byteLength) {
-        const { bytesWritten } = await handle.write(
-          value,
-          offset,
-          value.byteLength - offset,
-        );
-        if (bytesWritten < 1)
-          throw new Error("Could not write the osAi CLI archive");
-        offset += bytesWritten;
-      }
-      update(downloaded, total);
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    await handle.close();
-  }
-  if (downloaded < 1) throw new Error("The osAi CLI download was empty");
-}
-
 function cleanSetupLine(line: string) {
   return line.replace(/\s+/g, " ").trim().slice(0, 220);
 }
@@ -236,6 +180,7 @@ export class BackendInstaller {
   constructor(
     private readonly installationsRoot: string,
     private readonly pythonRuntimeRoot: string,
+    private readonly backendBundleRoot: string,
     private readonly emit: (status: BackendInstallStatus) => void,
     private readonly selectExecutable: (executable: string) => Promise<void>,
   ) {}
@@ -260,8 +205,7 @@ export class BackendInstaller {
   private async performInstall() {
     const installId = new Date().toISOString().replace(/[-:.TZ]/g, "");
     const installRoot = path.join(this.installationsRoot, installId);
-    const archive = path.join(installRoot, "osai-cli.zip");
-    const extracted = path.join(installRoot, "source");
+    const copiedSource = path.join(installRoot, "source");
     const venv = path.join(installRoot, ".venv");
     let log = "";
     try {
@@ -270,43 +214,73 @@ export class BackendInstaller {
         message: "Checking the bundled Python 3.12 runtime",
       });
       const python = await verifyBundledPython(this.pythonRuntimeRoot);
-      await fs.mkdir(extracted, { recursive: true, mode: 0o700 });
-      this.update({
-        state: "downloading",
-        message: `Downloading the complete osAi CLI repository · Python ${python.version}`,
-        percent: 0,
-      });
-      let lastReported = 0;
-      await downloadArchive(archive, (downloaded, total) => {
-        const now = Date.now();
-        if (now - lastReported < 150 && total && downloaded < total) return;
-        lastReported = now;
-        const percent = total
-          ? Math.min(100, Math.floor((downloaded / total) * 100))
-          : undefined;
-        const mib = (downloaded / 1024 / 1024).toFixed(1);
-        this.update({
-          state: "downloading",
-          message: `Downloading the complete osAi CLI repository · ${mib} MiB`,
-          percent,
-        });
-      });
-
+      const bundleManifestPath = path.join(
+        this.backendBundleRoot,
+        "OSAI_BACKEND_BUNDLE.json",
+      );
+      const bundleManifest = JSON.parse(
+        await fs.readFile(bundleManifestPath, "utf8").catch(() => {
+          throw new Error(
+            "This osAi App build does not contain its local training backend",
+          );
+        }),
+      ) as {
+        target?: string;
+        requiredLlamaTargets?: string[];
+      };
+      const expectedTarget = backendBundleTarget();
+      if (bundleManifest.target !== expectedTarget)
+        throw new Error(
+          `The bundled training backend targets ${bundleManifest.target || "an unknown platform"}, not ${expectedTarget}`,
+        );
+      const bundledSource = await findSourceRoot(
+        path.join(this.backendBundleRoot, "source"),
+      );
+      const wheelhouse = path.join(this.backendBundleRoot, "wheelhouse");
+      const wheels = await fs.readdir(wheelhouse).catch(() => []);
+      if (!wheels.some((name) => name.endsWith(".whl")))
+        throw new Error("This osAi App build has no offline Python packages");
+      const suffix = process.platform === "win32" ? ".exe" : "";
+      for (const target of bundleManifest.requiredLlamaTargets || []) {
+        const candidates = [
+          path.join(
+            bundledSource,
+            "vendor",
+            "llama.cpp",
+            "build",
+            "bin",
+            `${target}${suffix}`,
+          ),
+          path.join(
+            bundledSource,
+            "vendor",
+            "llama.cpp",
+            "build",
+            "bin",
+            "Release",
+            `${target}${suffix}`,
+          ),
+        ];
+        if (
+          !(
+            await Promise.all(
+              candidates.map((file) => fs.stat(file).catch(() => null)),
+            )
+          ).some((details) => details?.isFile())
+        )
+          throw new Error(`The bundled llama.cpp target is missing: ${target}`);
+      }
+      await fs.mkdir(installRoot, { recursive: true, mode: 0o700 });
       this.update({
         state: "extracting",
-        message: "Extracting the local osAi CLI repository",
+        message: `Preparing the bundled osAi backend · Python ${python.version}`,
+        percent: 10,
       });
-      const extract = await runCommand(
-        python.executable,
-        [...python.prefix, "-m", "zipfile", "-e", archive, extracted],
-        { timeoutMs: 20 * 60_000 },
-      );
-      if (extract.code !== 0)
-        throw new Error(
-          extract.stderr.trim() || "Could not extract the osAi CLI archive",
-        );
-      const source = await findSourceRoot(extracted);
-      await fs.rm(archive, { force: true });
+      await fs.cp(bundledSource, copiedSource, {
+        recursive: true,
+        verbatimSymlinks: true,
+      });
+      const source = await findSourceRoot(copiedSource);
 
       const installLog = path.join(installRoot, "install.log");
       const setupEnvironment = {
@@ -314,12 +288,15 @@ export class BackendInstaller {
         DO_NOT_TRACK: "1",
         HF_HUB_DISABLE_TELEMETRY: "1",
         PIP_DISABLE_PIP_VERSION_CHECK: "1",
+        PIP_NO_INDEX: "1",
+        PIP_NO_INPUT: "1",
         TOKENIZERS_PARALLELISM: "false",
         WANDB_MODE: "disabled",
       };
       this.update({
         state: "installing",
-        message: "Installing Python packages and building the local engines",
+        message: "Installing the bundled Python packages and local engines",
+        percent: 35,
       });
       const setup = await runCommand(
         python.executable,
@@ -328,6 +305,11 @@ export class BackendInstaller {
           path.join(source, "scripts", "setup_osai.py"),
           "--venv",
           venv,
+          "--offline",
+          "--wheelhouse",
+          wheelhouse,
+          "--skip-mlx-build",
+          "--skip-llama-build",
         ],
         {
           cwd: source,

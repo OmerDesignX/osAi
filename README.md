@@ -44,11 +44,11 @@ Every completed run publishes both `base-plus-adapter` and a standalone lossless
 ## Install
 
 1. Download the installer for your computer from the [osAi releases](https://github.com/OmerDesignX/osAi-CLI/releases), then open osAi App.
-2. On first launch, press **Install osAi**. The App uses its bundled CPython 3.12 runtime to download the complete osAi CLI repository, create a private environment, install the correct packages, and build the local engines automatically.
-3. The training workspace opens automatically when setup finishes. A separate Python installation is not required.
+2. On first launch, press **Install osAi**. The App uses its bundled CPython 3.12 runtime, complete osAi CLI source, offline Python packages, and prebuilt llama.cpp engines to create a private local environment.
+3. The training workspace opens automatically when setup finishes. Python, CMake, compilers, and command-line build tools are not required.
 4. If an existing installation is not found automatically, open **Settings**, select its executable under **osAi backend**, then press **Save and check**.
 
-The backend setup detects the operating system, architecture, macOS version, CUDA toolkit, and Vulkan tools. It selects GPU acceleration first and falls back to CPU when an automatically selected llama.cpp GPU build is unavailable.
+The packaged backend is native to the installer’s operating system and architecture. Runtime hardware detection selects GPU acceleration first and falls back to CPU when an automatically selected backend is unavailable.
 
 ## Start a training session
 
@@ -225,7 +225,7 @@ Press **Settings** to choose **Gunmetal + blue**, **Blue dark**, or **Blue light
 
 App-update checks are available in **Settings**. Press **Install locally** under **osAi backend** to install or repair the complete CLI without opening a browser. Enable **Install updates automatically** to close osAi and open a verified DMG, EXE, or DEB when an App update is ready.
 
-Network access is limited to initial backend setup, optional App updates, and official model downloads; training data and model outputs are never sent to those services.
+Backend setup is fully contained in the App and does not use the network. Network access is limited to optional App updates and official model downloads; training data and model outputs are never sent to those services.
 
 ## Build release installers
 

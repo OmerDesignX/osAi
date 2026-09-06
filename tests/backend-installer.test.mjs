@@ -4,29 +4,17 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  backendBundleTarget,
   backendExecutablePath,
   bundledPythonExecutable,
   findSourceRoot,
-  isTrustedBackendSourceUrl,
 } from "../dist-electron/main/backend-installer.js";
 
-test("accepts only trusted HTTPS hosts for the backend archive", () => {
-  assert.equal(
-    isTrustedBackendSourceUrl(
-      "https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/main",
-    ),
-    true,
-  );
-  assert.equal(
-    isTrustedBackendSourceUrl("http://codeload.github.com/archive.zip"),
-    false,
-  );
-  assert.equal(
-    isTrustedBackendSourceUrl(
-      "https://codeload.github.com.example/archive.zip",
-    ),
-    false,
-  );
+test("maps Electron platforms to packaged backend targets", () => {
+  assert.equal(backendBundleTarget("darwin", "arm64"), "macos-arm64");
+  assert.equal(backendBundleTarget("darwin", "x64"), "macos-x64");
+  assert.equal(backendBundleTarget("win32", "x64"), "windows-x64");
+  assert.equal(backendBundleTarget("linux", "x64"), "linux-x64");
 });
 
 test("uses the native virtual-environment executable layout", () => {
@@ -51,7 +39,7 @@ test("uses only the Python runtime packaged inside the application", () => {
   );
 });
 
-test("finds a complete repository inside a GitHub source archive", async () => {
+test("finds a complete repository inside the packaged backend", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-installer-"));
   const repository = path.join(root, "osAi-CLI-main");
   try {

@@ -13,7 +13,7 @@ bash releaseScripts/macos/build.sh
 bash releaseScripts/linux/build.sh
 ```
 
-Each script synchronizes the version, installs locked dependencies, downloads and SHA-256 verifies the pinned CPython runtime for the target architecture, checks formatting, runs the tests, verifies the native package, copies the finished installer into `release-assets/<platform>`, and removes the intermediate `release/` directory.
+Each script synchronizes the version, installs locked dependencies, downloads and SHA-256 records the osAi CLI source, compiles the required llama.cpp executables, creates an offline Python wheelhouse, downloads and verifies the pinned CPython runtime, runs the checks, verifies the native package, stages the installer in `release-assets/<platform>`, and removes intermediate output. Release builders need CMake and a native C/C++ toolchain; people installing the finished App do not.
 
 macOS produces:
 

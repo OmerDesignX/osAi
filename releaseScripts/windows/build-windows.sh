@@ -83,9 +83,11 @@ node "$ROOT/releaseScripts/common/cleanup-release.mjs"
 bash "$ROOT/releaseScripts/common/prepare-source.sh"
 cd "$ROOT"
 node scripts/prepare-python-runtime.mjs windows x64
+node scripts/prepare-backend-bundle.mjs windows x64 --refresh-source
 export CSC_IDENTITY_AUTO_DISCOVERY=false
 node "$ROOT/node_modules/electron-builder/cli.js" --win nsis --x64 --publish never
 node scripts/verify-package.mjs windows x64 "$ROOT/release"
 pnpm run release:stage:windows
 node scripts/prepare-python-runtime.mjs clean
+node scripts/prepare-backend-bundle.mjs clean
 node releaseScripts/common/cleanup-release.mjs

@@ -7,6 +7,10 @@ import type { SessionState, WorkerJob } from "../types.js";
 const jobPath = process.argv[2];
 if (!jobPath || !path.isAbsolute(jobPath)) process.exit(2);
 
+export function installedBackendSource(executable: string) {
+  return path.resolve(path.dirname(executable), "..", "..", "source");
+}
+
 let state: SessionState;
 let job: WorkerJob;
 let child: ChildProcess | null = null;
@@ -279,13 +283,24 @@ async function main() {
   await atomicStateWrite();
   const log = createWriteStream(job.logPath, { flags: "a", mode: 0o600 });
   log.write(`[osAi App] ${state.startedAt}\n[osAi App] ${state.command}\n\n`);
+  const bundledBackendSource = installedBackendSource(job.executable);
+  const bundledBackendExists = (
+    await fs
+      .stat(path.join(bundledBackendSource, "pyproject.toml"))
+      .catch(() => null)
+  )?.isFile();
   child = spawn(job.executable, job.args, {
     cwd: job.sessionDirectory,
     shell: false,
     detached: process.platform !== "win32",
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, PYTHONUNBUFFERED: "1", OSAI_APP_SESSION: job.id },
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: "1",
+      OSAI_APP_SESSION: job.id,
+      ...(bundledBackendExists ? { OSAI_ROOT: bundledBackendSource } : {}),
+    },
   });
   child.stdout?.pipe(log, { end: false });
   child.stderr?.pipe(log, { end: false });

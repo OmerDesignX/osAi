@@ -62,6 +62,12 @@ for (const architecture of ["arm64", "x64"]) {
     "macos",
     architecture,
   ]);
+  await run(process.execPath, [
+    "scripts/prepare-backend-bundle.mjs",
+    "macos",
+    architecture,
+    ...(architecture === "arm64" ? ["--refresh-source"] : []),
+  ]);
   const packageDirectory = path.join(root, "release", "macos-" + architecture);
   await removeGeneratedRelease(packageDirectory);
 
@@ -90,6 +96,7 @@ for (const architecture of ["arm64", "x64"]) {
 
 await run("pnpm", ["run", "release:stage:macos"]);
 await run(process.execPath, ["scripts/prepare-python-runtime.mjs", "clean"]);
+await run(process.execPath, ["scripts/prepare-backend-bundle.mjs", "clean"]);
 await removeGeneratedRelease(path.join(root, "release"));
 
 process.stdout.write(

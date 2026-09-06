@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/OmerDesignX/osAi-CLI",
+  "archive": "https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/main",
+  "ref": "main",
+  "requiredLlamaTargets": [
+    "llama-completion",
+    "llama-finetune",
+    "llama-perplexity",
+    "llama-quantize",
+    "llama-export-lora",
+    "llama-gguf-split"
+  ]
+}

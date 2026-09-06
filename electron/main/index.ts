@@ -275,6 +275,9 @@ app.whenReady().then(async () => {
     app.isPackaged
       ? path.join(process.resourcesPath, "python")
       : path.join(app.getAppPath(), "build", "python-runtime"),
+    app.isPackaged
+      ? path.join(process.resourcesPath, "backend")
+      : path.join(app.getAppPath(), "build", "backend-bundle"),
     (status) => send("backend-install:status-changed", status),
     async (executable) => {
       const current = await preferences();

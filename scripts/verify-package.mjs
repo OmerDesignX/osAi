@@ -29,7 +29,7 @@ function run(command, args) {
     });
     child.once("error", reject);
     child.once("exit", (code) => {
-      if (code === 0) resolve(stdout.trim());
+      if (code === 0) resolve(`${stdout}${stderr ? `\n${stderr}` : ""}`.trim());
       else
         reject(
           new Error(
@@ -48,6 +48,108 @@ async function requireArtifact(file, minimumBytes) {
   if (!details.isFile() || details.size < minimumBytes)
     throw new Error(path.basename(file) + " is missing or unexpectedly small");
   return details;
+}
+
+async function verifyBackendResources(
+  resources,
+  platform,
+  architecture,
+  expectedNativeArchitecture,
+) {
+  const backend = path.join(resources, "backend");
+  const bundle = JSON.parse(
+    await fs.readFile(path.join(backend, "OSAI_BACKEND_BUNDLE.json"), "utf8"),
+  );
+  if (bundle.target !== `${platform}-${architecture}`)
+    throw new Error(
+      `Backend bundle targets ${bundle.target}; expected ${platform}-${architecture}`,
+    );
+  await requireArtifact(
+    path.join(backend, "source", "scripts", "setup_osai.py"),
+    1_000,
+  );
+  const wheelhouse = path.join(backend, "wheelhouse");
+  const wheels = (await fs.readdir(wheelhouse)).filter((name) =>
+    name.endsWith(".whl"),
+  );
+  if (wheels.length < 6)
+    throw new Error("The packaged offline Python wheelhouse is incomplete");
+  const suffix = platform === "windows" ? ".exe" : "";
+  let llamaCompletion = "";
+  for (const target of bundle.requiredLlamaTargets || []) {
+    const direct = path.join(
+      backend,
+      "source",
+      "vendor",
+      "llama.cpp",
+      "build",
+      "bin",
+      `${target}${suffix}`,
+    );
+    const release = path.join(
+      path.dirname(direct),
+      "Release",
+      path.basename(direct),
+    );
+    const executable = (await fs.stat(direct).catch(() => null))?.isFile()
+      ? direct
+      : release;
+    // Recent llama.cpp builds keep most implementation code in adjacent shared
+    // libraries, so a valid launcher can be only a few tens of kilobytes.
+    await requireArtifact(executable, 10_000);
+    if (target === "llama-completion") llamaCompletion = executable;
+    if (platform === "macos" && expectedNativeArchitecture) {
+      const detected = await run("lipo", ["-archs", executable]);
+      if (detected !== expectedNativeArchitecture)
+        throw new Error(
+          `${target} contains architecture ${detected}; expected ${expectedNativeArchitecture}`,
+        );
+    }
+  }
+  if (platform === "macos") {
+    const bin = path.join(
+      backend,
+      "source",
+      "vendor",
+      "llama.cpp",
+      "build",
+      "bin",
+    );
+    const libraries = (await fs.readdir(bin)).filter((name) =>
+      name.endsWith(".dylib"),
+    );
+    for (const library of libraries) {
+      const linked = await run("otool", ["-L", path.join(bin, library)]);
+      for (const line of linked.split("\n").slice(1)) {
+        const dependency = line.trim().split(/\s+/, 1)[0] || "";
+        if (
+          dependency &&
+          !dependency.startsWith("@") &&
+          !dependency.startsWith("/usr/lib/") &&
+          !dependency.startsWith("/System/Library/")
+        )
+          throw new Error(
+            `${library} depends on unpackaged library ${dependency}`,
+          );
+      }
+    }
+    if (!llamaCompletion)
+      throw new Error("The packaged llama-completion executable is missing");
+    const version = await run("/usr/bin/env", [
+      "-i",
+      "PATH=/usr/bin:/bin",
+      llamaCompletion,
+      "--version",
+    ]);
+    if (!version.includes("version:"))
+      throw new Error("The packaged llama.cpp executable did not start");
+    const loadCommands = await run("otool", ["-l", llamaCompletion]);
+    const minimumMatch = loadCommands.match(/\bminos\s+([0-9.]+)/);
+    if (!minimumMatch || Number(minimumMatch[1].split(".")[0]) > 12)
+      throw new Error(
+        `The packaged llama.cpp executable requires unsupported macOS ${minimumMatch?.[1] || "unknown"}`,
+      );
+  }
 }
 
 if (platform === "macos") {
@@ -91,6 +193,7 @@ if (platform === "macos") {
     await requireArtifact(executable, 10_000);
     await requireArtifact(archive, 1_000_000);
     await requireArtifact(python, 1_000_000);
+    const resources = path.join(application, "Contents", "Resources");
 
     const detected = await run("lipo", ["-archs", executable]);
     const expected = architecture === "x64" ? "x86_64" : "arm64";
@@ -118,6 +221,7 @@ if (platform === "macos") {
     const pythonVersion = await run(python, ["--version"]);
     if (!pythonVersion.startsWith("Python 3.12."))
       throw new Error(artifactName + " bundles unexpected " + pythonVersion);
+    await verifyBackendResources(resources, "macos", architecture, expected);
 
     const minimum = await run("plutil", [
       "-extract",
@@ -149,6 +253,11 @@ if (platform === "macos") {
   const pythonVersion = await run(python, ["--version"]);
   if (!pythonVersion.startsWith("Python 3.12."))
     throw new Error(artifactName + " bundles unexpected " + pythonVersion);
+  await verifyBackendResources(
+    path.join(packageDirectory, "win-unpacked", "resources"),
+    "windows",
+    architecture,
+  );
   console.log("Verified " + artifactName);
 } else if (platform === "linux") {
   const entries = await fs.readdir(packageDirectory);
@@ -168,6 +277,11 @@ if (platform === "macos") {
   const pythonVersion = await run(python, ["--version"]);
   if (!pythonVersion.startsWith("Python 3.12."))
     throw new Error(packages[0] + " bundles unexpected " + pythonVersion);
+  await verifyBackendResources(
+    path.join(packageDirectory, "linux-unpacked", "resources"),
+    "linux",
+    architecture,
+  );
   console.log("Verified " + packages[0]);
 } else {
   throw new Error(
