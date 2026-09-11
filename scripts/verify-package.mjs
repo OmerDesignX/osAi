@@ -68,6 +68,10 @@ async function verifyBackendResources(
     path.join(backend, "source", "scripts", "setup_osai.py"),
     1_000,
   );
+  await requireArtifact(
+    path.join(backend, "source", "vendor", "mlx-vlm", "pyproject.toml"),
+    100,
+  );
   const wheelhouse = path.join(backend, "wheelhouse");
   const wheels = (await fs.readdir(wheelhouse)).filter((name) =>
     name.endsWith(".whl"),

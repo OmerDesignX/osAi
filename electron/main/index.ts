@@ -177,8 +177,8 @@ function registerIpc() {
         title: safeTitle,
         message: "Choose a dataset source",
         detail:
-          "Select one JSON/JSONL file or a folder containing dataset splits.",
-        buttons: ["Choose JSON file", "Choose folder", "Cancel"],
+          "Select one JSON, JSONL, or NDJSON file or a folder containing dataset splits.",
+        buttons: ["Choose data file", "Choose folder", "Cancel"],
         defaultId: 0,
         cancelId: 2,
         noLink: true,
@@ -190,7 +190,7 @@ function registerIpc() {
       title: safeTitle,
       properties,
       filters: properties.includes("openFile")
-        ? [{ name: "JSON datasets", extensions: ["json", "jsonl"] }]
+        ? [{ name: "JSON datasets", extensions: ["json", "jsonl", "ndjson"] }]
         : undefined,
     });
     return result.canceled ? "" : result.filePaths[0] || "";
@@ -213,7 +213,21 @@ function registerIpc() {
     });
     return result.canceled ? "" : result.filePaths[0] || "";
   });
-  ipcMain.handle("backend:status", () => sessionService.backendStatus());
+  ipcMain.handle("backend:status", async () => {
+    const status = await sessionService.backendStatus();
+    if (
+      !status.available ||
+      (await backendInstaller.isCurrent(status.executable))
+    )
+      return status;
+    const installed = await backendInstaller.install();
+    if (installed.state === "ready") return sessionService.backendStatus();
+    return {
+      ...status,
+      available: false,
+      message: installed.message,
+    };
+  });
   ipcMain.handle("backend-install:status", () => backendInstaller.getStatus());
   ipcMain.handle("backend-install:start", () => backendInstaller.install());
   ipcMain.handle("training:start", (_event, value: unknown) =>

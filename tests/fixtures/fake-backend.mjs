@@ -1,3 +1,8 @@
+if (process.argv.includes("--fail")) {
+  process.stderr.write("osai: unsupported dataset schema at train.jsonl:1\n");
+  process.exit(2);
+}
+
 process.stdout.write("Iter 1/2 loss=1.0\n");
 if (process.argv.includes("--long")) {
   setInterval(() => process.stdout.write("Iter 1/2 loss=1.0\n"), 200);

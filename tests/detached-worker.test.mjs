@@ -75,6 +75,60 @@ test("detached training continues after its launcher exits", async () => {
   }
 });
 
+test("a failed worker surfaces the backend error instead of only its exit code", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-fail-"));
+  const worker = path.resolve("dist-electron/main/training-worker.js");
+  const backend = path.resolve("tests/fixtures/fake-backend.mjs");
+  const statePath = path.join(root, "state.json");
+  const logPath = path.join(root, "training.log");
+  const jobPath = path.join(root, "job.json");
+  const now = new Date().toISOString();
+  const state = {
+    schemaVersion: 1,
+    id: "55555555-5555-4555-8555-555555555555",
+    name: "failure-test",
+    status: "queued",
+    phase: "preparing",
+    progress: 0,
+    indeterminate: true,
+    message: "queued",
+    createdAt: now,
+    sessionDirectory: root,
+    logPath,
+    command: "node fake-backend.mjs --fail",
+  };
+  const job = {
+    schemaVersion: 1,
+    id: state.id,
+    executable: process.execPath,
+    args: [backend, "--fail"],
+    sessionDirectory: root,
+    statePath,
+    logPath,
+    stopPath: path.join(root, "stop.request"),
+    stage: "fine-tuning",
+    iterations: 1,
+    alignmentIterations: 1,
+    createdAt: now,
+  };
+  await fs.writeFile(statePath, JSON.stringify(state));
+  await fs.writeFile(jobPath, JSON.stringify(job));
+  const processHandle = spawn(process.execPath, [worker, jobPath], {
+    stdio: "ignore",
+  });
+  try {
+    const failed = await waitFor(
+      statePath,
+      (value) => value.status === "failed",
+    );
+    assert.equal(failed.exitCode, 2);
+    assert.equal(failed.error, "unsupported dataset schema at train.jsonl:1");
+  } finally {
+    processHandle.kill("SIGKILL");
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a detached training worker stops only after an explicit stop request", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-stop-"));
   const worker = path.resolve("dist-electron/main/training-worker.js");

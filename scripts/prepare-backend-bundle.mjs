@@ -232,6 +232,7 @@ async function sourceRoot(extractionRoot) {
       path.join(candidate, "pyproject.toml"),
       path.join(candidate, "scripts", "setup_osai.py"),
       path.join(candidate, "vendor", "llama.cpp", "CMakeLists.txt"),
+      path.join(candidate, "vendor", "mlx-vlm", "pyproject.toml"),
     ];
     if (
       (

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  backendInstallationIsCurrent,
   backendBundleTarget,
   backendExecutablePath,
   bundledPythonExecutable,
@@ -61,6 +62,61 @@ test("rejects an incomplete downloaded repository", async () => {
     await assert.rejects(
       findSourceRoot(root),
       /not a complete osAi CLI repository/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("managed backends update when the packaged source identity changes", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "osai-backend-version-"),
+  );
+  const installations = path.join(root, "installations");
+  const bundle = path.join(root, "bundle");
+  const install = path.join(installations, "20260908");
+  const executable = backendExecutablePath(path.join(install, ".venv"));
+  const packagedManifest = {
+    schemaVersion: 1,
+    target: backendBundleTarget(),
+    sourceIdentity: "new-source",
+  };
+  try {
+    await fs.mkdir(path.dirname(executable), { recursive: true });
+    await fs.mkdir(bundle, { recursive: true });
+    await fs.writeFile(executable, "");
+    await fs.writeFile(
+      path.join(bundle, "OSAI_BACKEND_BUNDLE.json"),
+      JSON.stringify(packagedManifest),
+    );
+
+    assert.equal(
+      await backendInstallationIsCurrent(executable, installations, bundle),
+      false,
+    );
+    await fs.writeFile(
+      path.join(install, "OSAI_BACKEND_BUNDLE.json"),
+      JSON.stringify({ ...packagedManifest, sourceIdentity: "old-source" }),
+    );
+    assert.equal(
+      await backendInstallationIsCurrent(executable, installations, bundle),
+      false,
+    );
+    await fs.writeFile(
+      path.join(install, "OSAI_BACKEND_BUNDLE.json"),
+      JSON.stringify(packagedManifest),
+    );
+    assert.equal(
+      await backendInstallationIsCurrent(executable, installations, bundle),
+      true,
+    );
+    assert.equal(
+      await backendInstallationIsCurrent(
+        path.join(root, "external", "osai"),
+        installations,
+        bundle,
+      ),
+      true,
     );
   } finally {
     await fs.rm(root, { recursive: true, force: true });

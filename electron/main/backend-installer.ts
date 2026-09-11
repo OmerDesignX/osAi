@@ -55,6 +55,57 @@ export function bundledPythonExecutable(
   );
 }
 
+type BackendBundleManifest = {
+  sourceIdentity?: string;
+  target?: string;
+  requiredLlamaTargets?: string[];
+};
+
+async function readBundleManifest(file: string) {
+  try {
+    return JSON.parse(await fs.readFile(file, "utf8")) as BackendBundleManifest;
+  } catch {
+    return null;
+  }
+}
+
+export async function backendInstallationIsCurrent(
+  executable: string,
+  installationsRoot: string,
+  backendBundleRoot: string,
+  platform = process.platform,
+) {
+  const root = path.resolve(installationsRoot);
+  const resolvedExecutable = path.resolve(executable);
+  const relative = path.relative(root, resolvedExecutable);
+  if (
+    !relative ||
+    relative.startsWith(`..${path.sep}`) ||
+    relative === ".." ||
+    path.isAbsolute(relative)
+  )
+    return true;
+
+  const [installId] = relative.split(path.sep);
+  const installRoot = path.join(root, installId);
+  const expectedExecutable = path.resolve(
+    backendExecutablePath(path.join(installRoot, ".venv"), platform),
+  );
+  if (resolvedExecutable !== expectedExecutable) return false;
+
+  const bundled = await readBundleManifest(
+    path.join(backendBundleRoot, "OSAI_BACKEND_BUNDLE.json"),
+  );
+  const installed = await readBundleManifest(
+    path.join(installRoot, "OSAI_BACKEND_BUNDLE.json"),
+  );
+  return Boolean(
+    bundled?.sourceIdentity &&
+    bundled.sourceIdentity === installed?.sourceIdentity &&
+    bundled.target === installed?.target,
+  );
+}
+
 export async function findSourceRoot(extractedRoot: string) {
   const candidates = [
     extractedRoot,
@@ -189,6 +240,14 @@ export class BackendInstaller {
     return { ...this.status };
   }
 
+  isCurrent(executable: string) {
+    return backendInstallationIsCurrent(
+      executable,
+      this.installationsRoot,
+      this.backendBundleRoot,
+    );
+  }
+
   private update(next: BackendInstallStatus) {
     this.status = next;
     this.emit(this.getStatus());
@@ -218,16 +277,16 @@ export class BackendInstaller {
         this.backendBundleRoot,
         "OSAI_BACKEND_BUNDLE.json",
       );
-      const bundleManifest = JSON.parse(
-        await fs.readFile(bundleManifestPath, "utf8").catch(() => {
+      const bundleManifestSource = await fs
+        .readFile(bundleManifestPath, "utf8")
+        .catch(() => {
           throw new Error(
             "This osAi App build does not contain its local training backend",
           );
-        }),
-      ) as {
-        target?: string;
-        requiredLlamaTargets?: string[];
-      };
+        });
+      const bundleManifest = JSON.parse(
+        bundleManifestSource,
+      ) as BackendBundleManifest;
       const expectedTarget = backendBundleTarget();
       if (bundleManifest.target !== expectedTarget)
         throw new Error(
@@ -342,6 +401,11 @@ export class BackendInstaller {
           check.stderr.trim() ||
             "The installed osAi CLI did not start correctly",
         );
+      await fs.writeFile(
+        path.join(installRoot, "OSAI_BACKEND_BUNDLE.json"),
+        bundleManifestSource,
+        { mode: 0o600 },
+      );
       await this.selectExecutable(executable);
       this.update({
         state: "ready",

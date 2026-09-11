@@ -150,6 +150,64 @@ async function ensureSessionsRoot(value: string) {
   return root;
 }
 
+const mediaKeys = new Set([
+  "image",
+  "images",
+  "video",
+  "videos",
+  "audio",
+  "audios",
+]);
+
+function localMediaPath(value: string, sourceDirectory: string) {
+  const trimmed = value.trim();
+  if (
+    !trimmed ||
+    trimmed.startsWith("//") ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(trimmed)
+  )
+    return value;
+  return path.isAbsolute(trimmed)
+    ? path.normalize(trimmed)
+    : path.resolve(sourceDirectory, trimmed);
+}
+
+function resolveMediaValue(value: unknown, sourceDirectory: string): unknown {
+  if (typeof value === "string") return localMediaPath(value, sourceDirectory);
+  if (Array.isArray(value))
+    return value.map((item) => resolveMediaValue(item, sourceDirectory));
+  if (!value || typeof value !== "object") return value;
+  const result = { ...(value as Record<string, unknown>) };
+  if (typeof result.path === "string")
+    result.path = localMediaPath(result.path, sourceDirectory);
+  if (typeof result.url === "string")
+    result.url = localMediaPath(result.url, sourceDirectory);
+  return result;
+}
+
+export function absolutizeDatasetMedia(
+  value: unknown,
+  sourceDirectory: string,
+): unknown {
+  if (Array.isArray(value))
+    return value.map((item) => absolutizeDatasetMedia(item, sourceDirectory));
+  if (!value || typeof value !== "object") return value;
+  const result = { ...(value as Record<string, unknown>) };
+  const type = typeof result.type === "string" ? result.type.toLowerCase() : "";
+  const modality = type.replace(/_url$/, "");
+  if (["image", "video", "audio"].includes(modality)) {
+    for (const key of [modality, `${modality}_url`, "url", "path"])
+      if (key in result)
+        result[key] = resolveMediaValue(result[key], sourceDirectory);
+  }
+  for (const [key, child] of Object.entries(result)) {
+    result[key] = mediaKeys.has(key)
+      ? resolveMediaValue(child, sourceDirectory)
+      : absolutizeDatasetMedia(child, sourceDirectory);
+  }
+  return result;
+}
+
 async function writeJsonLines(input: string, output: string) {
   const handle = await fs.open(output, "wx", 0o600);
   const lines = readline.createInterface({
@@ -169,7 +227,7 @@ async function writeJsonLines(input: string, output: string) {
       }
       if (!row || typeof row !== "object" || Array.isArray(row))
         throw new Error(`Dataset rows must be JSON objects: ${input}`);
-      buffer += `${JSON.stringify(row)}\n`;
+      buffer += `${JSON.stringify(absolutizeDatasetMedia(row, path.dirname(input)))}\n`;
       rows += 1;
       if (buffer.length >= 1024 * 1024) {
         await handle.write(buffer);
@@ -200,12 +258,18 @@ async function writeJsonDocument(input: string, output: string) {
       ? container.train
       : container && Array.isArray(container.data)
         ? container.data
-        : [parsed];
+        : container && Array.isArray(container.records)
+          ? container.records
+          : container && Array.isArray(container.examples)
+            ? container.examples
+            : container && Array.isArray(container.items)
+              ? container.items
+              : [parsed];
   if (records.length < 1) throw new Error(`Dataset file is empty: ${input}`);
   const lines = records.map((row) => {
     if (!row || typeof row !== "object" || Array.isArray(row))
       throw new Error(`Dataset rows must be JSON objects: ${input}`);
-    return JSON.stringify(row);
+    return JSON.stringify(absolutizeDatasetMedia(row, path.dirname(input)));
   });
   await fs.writeFile(output, `${lines.join("\n")}\n`, {
     flag: "wx",
@@ -223,18 +287,16 @@ export async function prepareDatasetSelection(
   if (stat.isDirectory()) return selected;
   if (
     !stat.isFile() ||
-    ![".json", ".jsonl"].includes(path.extname(selected).toLowerCase())
+    ![".json", ".jsonl", ".ndjson"].includes(
+      path.extname(selected).toLowerCase(),
+    )
   )
-    throw new Error(`${label} must be a folder or a .json/.jsonl file`);
+    throw new Error(`${label} must be a folder or a .json/.jsonl/.ndjson file`);
   await fs.mkdir(destination, { recursive: false, mode: 0o700 });
   const output = path.join(destination, "train.jsonl");
   if (path.extname(selected).toLowerCase() === ".json") {
     await writeJsonDocument(selected, output);
-  } else {
-    await fs.link(selected, output).catch(async () => {
-      await fs.copyFile(selected, output, fs.constants.COPYFILE_EXCL);
-    });
-  }
+  } else await writeJsonLines(selected, output);
   return destination;
 }
 
@@ -389,6 +451,47 @@ export async function buildOsAiArgs(
       args,
       "--dropout",
       optionalNumber(input.dropout, "Dropout", 0, 0.999999),
+    );
+    const imageWidth = optionalInteger(
+      input.imageWidth,
+      "Image width",
+      16,
+      65_536,
+    );
+    const imageHeight = optionalInteger(
+      input.imageHeight,
+      "Image height",
+      16,
+      65_536,
+    );
+    if ((imageWidth === null) !== (imageHeight === null))
+      throw new Error("Image width and height must be set together");
+    if (imageWidth !== null && imageHeight !== null)
+      args.push("--image-size", String(imageWidth), String(imageHeight));
+    args.push(
+      "--video-fps",
+      String(
+        optionalNumber(
+          input.videoFps ?? 2,
+          "Video frames per second",
+          0,
+          240,
+          false,
+        ),
+      ),
+      "--video-max-frames",
+      String(
+        positiveInteger(
+          input.videoMaxFrames ?? 32,
+          "Maximum video frames",
+          32_768,
+        ),
+      ),
+    );
+    pushOptional(
+      args,
+      "--assistant-token-id",
+      optionalInteger(input.assistantTokenId, "Assistant token ID", 0),
     );
     pushOptional(
       args,
@@ -605,6 +708,15 @@ export function restoreLegacyRequest(
     scale: numericArgument(args, "--scale"),
     numLayers: numericArgument(args, "--num-layers"),
     dropout: numericArgument(args, "--dropout"),
+    imageWidth: numericArgument(args, "--image-size"),
+    imageHeight: (() => {
+      const index = args.lastIndexOf("--image-size");
+      const value = Number(index >= 0 ? args[index + 2] : undefined);
+      return Number.isFinite(value) ? value : undefined;
+    })(),
+    videoFps: numericArgument(args, "--video-fps") || 2,
+    videoMaxFrames: numericArgument(args, "--video-max-frames") || 32,
+    assistantTokenId: numericArgument(args, "--assistant-token-id"),
     seed: numericArgument(args, "--seed"),
     saveEvery: numericArgument(args, "--save-every"),
     stepsPerReport: numericArgument(args, "--steps-per-report"),
@@ -682,20 +794,38 @@ function sharedFineTuneRow(value: unknown, file: string, lineNumber: number) {
   if (!value || typeof value !== "object")
     throw new Error(`Expected a JSON object at ${file}:${lineNumber}`);
   const row = value as Record<string, unknown>;
-  const prompt = typeof row.prompt === "string" ? row.prompt.trim() : "";
-  const completion =
-    typeof row.completion === "string" ? row.completion.trim() : "";
-  const chosen = typeof row.chosen === "string" ? row.chosen.trim() : "";
-  const rejected = typeof row.rejected === "string" ? row.rejected.trim() : "";
-  const response = typeof row.response === "string" ? row.response.trim() : "";
-  const reward = Number(row.reward);
-  const hasPreference = Boolean(prompt && chosen && rejected);
-  const hasReward = Boolean(prompt && response && Number.isFinite(reward));
-  if (prompt && completion && (hasPreference || hasReward)) return row;
-  if (hasPreference) return { prompt, completion: chosen };
-  if (hasReward) return { prompt, completion: response };
+  const present = (...keys: string[]) =>
+    keys.some((key) => {
+      const item = row[key];
+      return (
+        (typeof item === "string" && Boolean(item.trim())) ||
+        (Array.isArray(item) && item.length > 0)
+      );
+    });
+  const hasPrompt = present("prompt", "question", "query", "instruction");
+  const hasPreference =
+    hasPrompt &&
+    present("chosen", "preferred", "accepted", "winner") &&
+    present(
+      "rejected",
+      "non_preferred",
+      "dispreferred",
+      "unpreferred",
+      "loser",
+    );
+  const hasRankedPair =
+    hasPrompt &&
+    present("response_j") &&
+    present("response_k") &&
+    "label" in row;
+  const hasReward =
+    hasPrompt &&
+    present("response", "completion", "answer", "output") &&
+    (Number.isFinite(Number(row.reward ?? row.score ?? row.value)) ||
+      "label" in row);
+  if (hasPreference || hasRankedPair || hasReward) return row;
   throw new Error(
-    `Shared data needs prompt/chosen/rejected or prompt/response/reward rows (${file}:${lineNumber})`,
+    `Shared data needs a preference, binary-feedback, or scored-response row (${file}:${lineNumber})`,
   );
 }
 

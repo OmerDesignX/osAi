@@ -18,6 +18,7 @@ let stopping = false;
 let paused = false;
 let pausedIndeterminate = false;
 let finalised = false;
+let lastStderrLine = "";
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
 let writeChain = Promise.resolve();
 
@@ -104,6 +105,13 @@ function consumeLine(raw: string) {
     }
   }
   void scheduleStateWrite();
+}
+
+function consumeStderrLine(raw: string) {
+  consumeLine(raw);
+  const line = raw.replace(/\x1b\[[0-9;]*m/g, "").trim();
+  if (!line) return;
+  lastStderrLine = line.replace(/^osai:\s*/i, "").slice(0, 1000);
 }
 
 function lineReader(consume: (line: string) => void) {
@@ -305,7 +313,7 @@ async function main() {
   child.stdout?.pipe(log, { end: false });
   child.stderr?.pipe(log, { end: false });
   child.stdout?.on("data", lineReader(consumeLine));
-  child.stderr?.on("data", lineReader(consumeLine));
+  child.stderr?.on("data", lineReader(consumeStderrLine));
   child.once("spawn", () => {
     state.processPid = child?.pid;
     void scheduleStateWrite(true);
@@ -318,7 +326,7 @@ async function main() {
     const status = stopping ? "stopped" : code === 0 ? "completed" : "failed";
     const error =
       status === "failed"
-        ? `osAi exited with ${code ?? signal ?? "an error"}`
+        ? lastStderrLine || `osAi exited with ${code ?? signal ?? "an error"}`
         : undefined;
     void finish(status, code, error).finally(() => log.end());
   });

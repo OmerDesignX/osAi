@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   buildOsAiArgs,
+  absolutizeDatasetMedia,
   prepareDatasetSelection,
   prepareSharedFineTuneData,
   restoreLegacyRequest,
@@ -41,6 +42,11 @@ const base = {
   scale: null,
   numLayers: null,
   dropout: null,
+  imageWidth: null,
+  imageHeight: null,
+  videoFps: 2,
+  videoMaxFrames: 32,
+  assistantTokenId: null,
   seed: null,
   saveEvery: null,
   stepsPerReport: null,
@@ -64,6 +70,33 @@ const base = {
   mainGpu: null,
   devices: "",
 };
+
+test("resolves relative media beside an individually selected dataset", () => {
+  const result = absolutizeDatasetMedia(
+    {
+      image: "images/a.png",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "video", video: "clips/a.mp4" },
+            { type: "audio_url", audio_url: { path: "sound/a.wav" } },
+          ],
+        },
+      ],
+    },
+    "/datasets/demo",
+  );
+  assert.equal(result.image, "/datasets/demo/images/a.png");
+  assert.equal(
+    result.messages[0].content[0].video,
+    "/datasets/demo/clips/a.mp4",
+  );
+  assert.equal(
+    result.messages[0].content[1].audio_url.path,
+    "/datasets/demo/sound/a.wav",
+  );
+});
 
 test("restores settings from sessions created by earlier app builds", () => {
   const sessionDirectory = path.join(
@@ -239,10 +272,11 @@ test("moves finished sessions to Trash and protects active sessions", async () =
   }
 });
 
-test("prepares individual JSON and JSONL dataset files for the CLI", async () => {
+test("prepares individual JSON, JSONL, and NDJSON dataset files for the CLI", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-dataset-file-"));
   const json = path.join(root, "fine-tune.json");
   const jsonl = path.join(root, "alignment.jsonl");
+  const ndjson = path.join(root, "chat.ndjson");
   await fs.writeFile(
     json,
     JSON.stringify([
@@ -253,6 +287,15 @@ test("prepares individual JSON and JSONL dataset files for the CLI", async () =>
   await fs.writeFile(
     jsonl,
     `${JSON.stringify({ prompt: "One", chosen: "Yes", rejected: "No" })}\n`,
+  );
+  await fs.writeFile(
+    ndjson,
+    `${JSON.stringify({
+      messages: [
+        { role: "user", content: "Hi" },
+        { role: "assistant", content: "Hello" },
+      ],
+    })}\n`,
   );
   try {
     const fine = await prepareDatasetSelection(
@@ -265,6 +308,11 @@ test("prepares individual JSON and JSONL dataset files for the CLI", async () =>
       path.join(root, "prepared-align"),
       "Alignment dataset",
     );
+    const chat = await prepareDatasetSelection(
+      ndjson,
+      path.join(root, "prepared-chat"),
+      "Fine-tuning dataset",
+    );
     assert.equal(
       await fs.readFile(path.join(fine, "train.jsonl"), "utf8"),
       '{"prompt":"One","completion":"First"}\n{"prompt":"Two","completion":"Second"}\n',
@@ -272,6 +320,10 @@ test("prepares individual JSON and JSONL dataset files for the CLI", async () =>
     assert.equal(
       await fs.readFile(path.join(align, "train.jsonl"), "utf8"),
       '{"prompt":"One","chosen":"Yes","rejected":"No"}\n',
+    );
+    assert.match(
+      await fs.readFile(path.join(chat, "train.jsonl"), "utf8"),
+      /"messages"/,
     );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -497,7 +549,7 @@ test("prepares one preference dataset safely for both pipeline stages", async ()
     await prepareSharedFineTuneData(source, prepared);
     assert.deepEqual(
       JSON.parse(await fs.readFile(path.join(prepared, "train.jsonl"), "utf8")),
-      { prompt: "Name a colour", completion: "Blue" },
+      { prompt: "Name a colour", chosen: "Blue", rejected: "Banana" },
     );
   } finally {
     await fs.rm(root, { recursive: true, force: true });

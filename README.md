@@ -25,6 +25,8 @@ osCode Models are supported by default, and custom models can be added. See [osC
 Supported training modes:
 
 - MLX gradient LoRA on Apple silicon and Linux.
+- Quantized MLX-VLM gradient LoRA using local images, video, and compatible
+  audio.
 - llama.cpp gradient LoRA on GGUF models.
 - DPO, IPO, SimPO, ORPO, CPO, KTO, PPO, REINFORCE, RLOO, and GRPO alignment.
 
@@ -56,7 +58,7 @@ The packaged backend is native to the installer’s operating system and archite
 2. For an osCode model, press **Small**, **Medium**, or **Large**. For a custom model, press the folder button and select its model folder.
 3. Leave **Engine**, **Accelerator**, and **Multi-GPU** on **Auto** for hardware-aware selection, or choose them manually.
 4. Under **Pipeline**, press **Fine-tune**, **Align**, or **Fine-tune + align**.
-5. Press the dataset browse button and select either a `.json`/`.jsonl` file or a folder containing `train.jsonl`.
+5. Press the dataset browse button and select a `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `train.jsonl`.
 6. Keep **Fit settings to this hardware** enabled unless manual control is needed.
 7. Enter a recognizable **Session name**, or leave the suggested name in place.
 8. Choose **Save sessions in** when a different location is needed. The default is `~/osAi/sessions` in the user's home folder.
@@ -64,7 +66,30 @@ The packaged backend is native to the installer’s operating system and archite
 
 While a run is active, **Start training** becomes **Pause training** and **Stop training**. A paused run can be resumed from the same controls. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
 
-Choose a single `.json` or `.jsonl` dataset file, or a folder containing `train.jsonl` with optional `valid.jsonl` and `test.jsonl` splits. Fine-tuning rows may use `text`, `prompt` with `completion`, or a `messages` list.
+Choose a single `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `train.jsonl` with optional `valid.jsonl` and `test.jsonl` splits. JSON arrays and objects containing `train`, `data`, `records`, `examples`, or `items` arrays are unpacked automatically.
+
+| Dataset layout                  | Accepted fields                                                            |
+| ------------------------------- | -------------------------------------------------------------------------- |
+| Language modelling              | `text`                                                                     |
+| Completion                      | string or conversational `prompt` + `completion`                           |
+| Chat and tools                  | OpenAI `messages`, content parts, `tools`, and `tool_calls`                |
+| ShareGPT and dialogue           | `conversations`, `conversation`, `dialog`, or `dialogue`                   |
+| Instruction                     | Alpaca `instruction/input/output` and Dolly `instruction/context/response` |
+| QA and translation              | `question/answer`, `query/response`, `source/target`, and `src/tgt`        |
+| Preference used for fine-tuning | `prompt` + `chosen/rejected`; the chosen answer becomes the target         |
+
+Equivalent supervised layouts may be mixed in one split. osAi checks every row
+and converts it to one canonical local dataset. Image, audio, video, and
+multimodal content-part layouts are passed to a complete local quantized MLX VLM.
+Relative paths resolve beside the selected dataset file. The App copies the
+dataset and resolves its media references into the session, and it never fetches
+a media URL from a dataset.
+
+Choose a complete VLM under **Custom model** for media training. For a GGUF VLM,
+the same custom model folder must also contain its matching quantized MLX VLM;
+the media-conditioned backward pass runs in MLX and osAi exports the language
+adapter to GGUF. Any `mmproj*.gguf` sidecar is retained unchanged. The current
+model's processor and actual media-tower tensors are checked before training.
 
 ### Pipeline buttons
 
@@ -86,7 +111,11 @@ Select **Align** or **Fine-tune + align** to reveal the alignment controls.
 - Leave **Generate fresh answers locally** enabled to make the current fine-tuned policy generate and score new answers during the run.
 - Turn **Generate fresh answers locally** off only when the alignment dataset already contains the responses or scores to train from.
 
-Alignment rows contain either `prompt`, `chosen`, and `rejected`, or `prompt`, `response`, and a numeric `reward` with optional `old_logprob`.
+Alignment accepts standard or conversational `prompt/chosen/rejected`, implicit
+chosen/rejected conversations with a shared prompt, common
+`preferred/non_preferred` or `winner/loser` aliases, ranked
+`response_j/response_k`, numeric `prompt/response/reward`, and KTO
+`prompt/completion/label` rows.
 
 Fresh answers are generated by the local fine-tuned model. Pairwise methods compare them with local references, while reward methods use local reference-derived scoring. RLOO and GRPO generate at least two answers per prompt and calculate their group baselines locally. “Live” or “online” RL means the current policy creates fresh experience during the run; it does not mean an internet connection or hosted service.
 
@@ -143,6 +172,7 @@ Use **Advanced** to set:
 
 - **Optimization:** iterations, optimizer, batch size, gradient accumulation, sequence length, learning rates, and seed
 - **LoRA adapter:** rank, scale, adapted layers, dropout, and target projections
+- **Media:** optional image size, video frame rate and frame cap, and assistant token ID
 - **Alignment and rollouts:** beta, gamma, PPO clipping, answers per prompt, maximum new tokens, temperature, top-p, and seed
 - **Saving and evaluation:** checkpoint cadence, gradient checkpointing, reporting, validation, and prompt masking
 - **Engine runtime:** GGUF microbatch and threads, MLX workers, GPU split, main GPU, and device order
@@ -165,8 +195,8 @@ Organize each custom model inside its own folder:
 
 ```text
 models/custom/my-model/
-├── mlx/       # MLX model files
-└── gguf/      # one GGUF file or a complete split set
+├── mlx/       # complete quantized MLX LM or VLM checkpoint
+└── gguf/      # GGUF shard set and optional mmproj*.gguf
 ```
 
 In the App, press **Custom model**, press the **Model folder** button, and select `my-model`. Leave **Engine → Auto** to choose the compatible format automatically.
@@ -195,7 +225,7 @@ Combined runs keep the supervised stage below `stages/fine-tuning/` and place th
 
 For MLX, the deployment bundle leaves every quantized tensor unchanged and embeds the adapter in `osai_adapter/`. osAi verifies that its next-token logits exactly match the original base-plus-adapter path.
 
-For GGUF, the bundle keeps the original file or split shards unchanged under `model/`, stores the exact adapter as `osai_adapter.gguf`, and records both in `osai_fusion.json`. SHA-256 checks verify the copied base and adapter. No unified, dequantized, or requantized model is created.
+For GGUF, the bundle keeps the original file or split shards and any multimodal projector unchanged under `model/`, stores the exact adapter as `osai_adapter.gguf`, and records them in `osai_fusion.json`. SHA-256 checks verify every copy. No unified, dequantized, or requantized model is created.
 
 ## App controls
 

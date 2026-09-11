@@ -63,6 +63,11 @@ export type TrainingRequest = {
   scale: number | null;
   numLayers: number | null;
   dropout: number | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  videoFps: number;
+  videoMaxFrames: number;
+  assistantTokenId: number | null;
   seed: number | null;
   saveEvery: number | null;
   stepsPerReport: number | null;

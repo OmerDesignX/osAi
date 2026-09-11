@@ -154,6 +154,11 @@ const defaults: TrainingRequest = {
   scale: null,
   numLayers: null,
   dropout: null,
+  imageWidth: null,
+  imageHeight: null,
+  videoFps: 2,
+  videoMaxFrames: 32,
+  assistantTokenId: null,
   seed: null,
   saveEvery: null,
   stepsPerReport: null,
@@ -203,7 +208,7 @@ const fallbackPreferences: Preferences = {
 const fallbackUpdate: AppUpdateStatus = {
   state: "disabled",
   message: "Automatic updates are off",
-  currentVersion: "0.1.2",
+  currentVersion: "0.1.5",
 };
 
 const fallbackBackendInstall: BackendInstallStatus = {
@@ -845,7 +850,10 @@ export function App() {
               <section className="form-section">
                 <div className="section-heading">
                   <h2>Data</h2>
-                  <p>All preparation and training stay on this computer.</p>
+                  <p>
+                    Text, image, video and compatible audio data stay on this
+                    computer.
+                  </p>
                 </div>
                 {needsFineTune && (
                   <PathField
@@ -1206,6 +1214,65 @@ export function App() {
                             );
                           })}
                         </div>
+                      </div>
+                    </section>
+                  )}
+
+                  {needsFineTune && (
+                    <section className="advanced-group">
+                      <div className="advanced-heading">
+                        <h3>Media</h3>
+                        <p>
+                          Local VLM preprocessing. Leave image size empty to use
+                          the model processor default.
+                        </p>
+                      </div>
+                      <div className="advanced-grid">
+                        <NumberField
+                          label="Image width"
+                          value={form.imageWidth}
+                          min={16}
+                          placeholder="Model default"
+                          onChange={(imageWidth) =>
+                            setForm({ ...form, imageWidth })
+                          }
+                        />
+                        <NumberField
+                          label="Image height"
+                          value={form.imageHeight}
+                          min={16}
+                          placeholder="Model default"
+                          onChange={(imageHeight) =>
+                            setForm({ ...form, imageHeight })
+                          }
+                        />
+                        <NumberField
+                          label="Video frames per second"
+                          value={form.videoFps}
+                          min={0.01}
+                          step="any"
+                          onChange={(videoFps) =>
+                            videoFps !== null && setForm({ ...form, videoFps })
+                          }
+                        />
+                        <NumberField
+                          label="Maximum video frames"
+                          value={form.videoMaxFrames}
+                          min={2}
+                          onChange={(videoMaxFrames) =>
+                            videoMaxFrames !== null &&
+                            setForm({ ...form, videoMaxFrames })
+                          }
+                        />
+                        <NumberField
+                          label="Assistant token ID"
+                          value={form.assistantTokenId}
+                          min={0}
+                          placeholder="Detect automatically"
+                          onChange={(assistantTokenId) =>
+                            setForm({ ...form, assistantTokenId })
+                          }
+                        />
                       </div>
                     </section>
                   )}
