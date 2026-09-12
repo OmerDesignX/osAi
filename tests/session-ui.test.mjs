@@ -56,12 +56,15 @@ test("the local training wiki opens as a searchable session tab", async () => {
   assert.match(wiki, /aria-label="Search the training wiki"/);
   assert.match(wiki, /Wiki table of contents/);
   assert.match(wiki, /className="wiki-search-dock"/);
+  assert.match(wiki, /Ai Training Wiki/);
+  assert.doesNotMatch(wiki, /className="wiki-hero"/);
   assert.match(wiki, /aria-label="Wiki view controls"/);
   assert.match(wiki, /Hide contents/);
   assert.match(wiki, /Show contents/);
   assert.match(wiki, /Use continuous scrolling/);
   assert.match(wiki, /Use page mode/);
   assert.match(wiki, /Article \{activeIndex \+ 1\} of \{filtered\.length\}/);
+  assert.match(wiki, /entryLinksRef\.current\[entryId\]\?\.scrollIntoView/);
   assert.match(wiki, /terms\.every\(\(term\) => haystack\.includes\(term\)\)/);
   assert.doesNotMatch(wiki, /https?:\/\//);
   assert.match(styles, /\.wiki-view\s*\{/);
@@ -69,6 +72,10 @@ test("the local training wiki opens as a searchable session tab", async () => {
   assert.match(styles, /\.wiki-search\s*\{/);
   assert.match(styles, /\.wiki-toc-scroll\s*\{[^}]*overflow-y:\s*auto/s);
   assert.match(styles, /\.wiki-tool-rail\s*\{/);
+  assert.match(
+    styles,
+    /grid-template-columns:\s*42px minmax\(180px, 220px\) minmax\(0, 1fr\)/,
+  );
   assert.match(styles, /\.wiki-note\s*\{[^}]*border-left:\s*1px/s);
 });
 

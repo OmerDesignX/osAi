@@ -1052,6 +1052,7 @@ export function TrainingWiki() {
   const [readingMode, setReadingMode] = useState<"page" | "continuous">("page");
   const [activeEntryId, setActiveEntryId] = useState(wikiEntries[0].id);
   const articlesRef = useRef<HTMLDivElement>(null);
+  const entryLinksRef = useRef<Record<string, HTMLAnchorElement | null>>({});
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const filtered = useMemo(
     () =>
@@ -1071,6 +1072,10 @@ export function TrainingWiki() {
   function selectEntry(entryId: string) {
     setActiveEntryId(entryId);
     requestAnimationFrame(() => {
+      entryLinksRef.current[entryId]?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
       articlesRef.current?.scrollIntoView({
         behavior: "smooth",
         block: "start",
@@ -1086,6 +1091,10 @@ export function TrainingWiki() {
   return (
     <div className="wiki-view">
       <div className="wiki-search-dock">
+        <span className="wiki-title-tag">
+          <WikiIcon name="book-open" />
+          Ai Training Wiki
+        </span>
         <label className="wiki-search">
           <WikiIcon name="search" />
           <input
@@ -1111,74 +1120,12 @@ export function TrainingWiki() {
             </button>
           )}
         </label>
+        <span aria-hidden="true" />
       </div>
-
-      <header className="wiki-hero">
-        <div>
-          <span className="wiki-kicker">Local training reference</span>
-          <h1>osAi Training Wiki</h1>
-          <p>
-            A beginner-to-advanced guide to datasets, quantized fine-tuning,
-            alignment, local rollouts, policy gradients, and evaluation.
-          </p>
-        </div>
-      </header>
 
       <div
         className={`wiki-layout ${contentsOpen ? "" : "contents-collapsed"}`}
       >
-        {contentsOpen && (
-          <nav className="wiki-toc" aria-label="Wiki table of contents">
-            <div className="wiki-toc-heading">
-              <h2>Contents</h2>
-              <p>
-                {query
-                  ? `${filtered.length} of ${wikiEntries.length} articles`
-                  : `${wikiEntries.length} articles`}
-              </p>
-            </div>
-            <div className="wiki-toc-scroll">
-              {levels.map((level) => {
-                const entries = filtered.filter(
-                  (entry) => entry.level === level,
-                );
-                if (!entries.length) return null;
-                return (
-                  <section key={level}>
-                    <h3>{level}</h3>
-                    {entries.map((entry) => (
-                      <a
-                        key={entry.id}
-                        href={`#wiki-${entry.id}`}
-                        className={
-                          readingMode === "page" && entry.id === activeEntry?.id
-                            ? "active"
-                            : undefined
-                        }
-                        aria-current={
-                          readingMode === "page" && entry.id === activeEntry?.id
-                            ? "page"
-                            : undefined
-                        }
-                        onClick={(event) => {
-                          if (readingMode === "page") {
-                            event.preventDefault();
-                            selectEntry(entry.id);
-                          } else {
-                            setActiveEntryId(entry.id);
-                          }
-                        }}
-                      >
-                        {entry.title}
-                      </a>
-                    ))}
-                  </section>
-                );
-              })}
-            </div>
-          </nav>
-        )}
-
         <aside className="wiki-tool-rail" aria-label="Wiki view controls">
           <button
             type="button"
@@ -1235,6 +1182,61 @@ export function TrainingWiki() {
             </>
           )}
         </aside>
+
+        {contentsOpen && (
+          <nav className="wiki-toc" aria-label="Wiki table of contents">
+            <div className="wiki-toc-heading">
+              <h2>Contents</h2>
+              <p>
+                {query
+                  ? `${filtered.length} of ${wikiEntries.length} articles`
+                  : `${wikiEntries.length} articles`}
+              </p>
+            </div>
+            <div className="wiki-toc-scroll">
+              {levels.map((level) => {
+                const entries = filtered.filter(
+                  (entry) => entry.level === level,
+                );
+                if (!entries.length) return null;
+                return (
+                  <section key={level}>
+                    <h3>{level}</h3>
+                    {entries.map((entry) => (
+                      <a
+                        key={entry.id}
+                        href={`#wiki-${entry.id}`}
+                        ref={(link) => {
+                          entryLinksRef.current[entry.id] = link;
+                        }}
+                        className={
+                          readingMode === "page" && entry.id === activeEntry?.id
+                            ? "active"
+                            : undefined
+                        }
+                        aria-current={
+                          readingMode === "page" && entry.id === activeEntry?.id
+                            ? "page"
+                            : undefined
+                        }
+                        onClick={(event) => {
+                          if (readingMode === "page") {
+                            event.preventDefault();
+                            selectEntry(entry.id);
+                          } else {
+                            setActiveEntryId(entry.id);
+                          }
+                        }}
+                      >
+                        {entry.title}
+                      </a>
+                    ))}
+                  </section>
+                );
+              })}
+            </div>
+          </nav>
+        )}
 
         <div
           className="wiki-articles"
