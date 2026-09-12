@@ -10,6 +10,7 @@ import {
   prepareDatasetSelection,
   prepareSharedFineTuneData,
   restoreLegacyRequest,
+  osAiVersionFromOutput,
   SessionService,
 } from "../dist-electron/main/session-service.js";
 
@@ -71,6 +72,31 @@ const base = {
   mainGpu: null,
   devices: "",
 };
+
+test("accepts only a real osAi CLI version response", () => {
+  assert.equal(osAiVersionFromOutput("osai 0.1.0\n"), "osai 0.1.0");
+  assert.equal(
+    osAiVersionFromOutput("warning: local setup\nosAi 1.2.3-beta.1+local\n"),
+    "osAi 1.2.3-beta.1+local",
+  );
+  assert.equal(osAiVersionFromOutput(""), "");
+  assert.equal(osAiVersionFromOutput("v24.19.0\n"), "");
+});
+
+test("does not report an unrelated executable as a connected osAi CLI", async () => {
+  const service = new SessionService("unused", "unused", async () => ({
+    version: 1,
+    theme: "dark",
+    backendExecutable: process.execPath,
+    autoUpdateEnabled: false,
+    sessionsRoot: "",
+    sessionRoots: [],
+  }));
+  const status = await service.backendStatus();
+  assert.equal(status.available, false);
+  assert.equal(status.version, "");
+  assert.match(status.message, /not the osAi CLI/);
+});
 
 test("resolves relative media beside an individually selected dataset", () => {
   const sourceDirectory = path.join(

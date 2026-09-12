@@ -19,6 +19,8 @@ import type {
 } from "../types.js";
 
 const activeStatuses = new Set(["queued", "running", "paused", "stopping"]);
+const BACKEND_STATUS_TIMEOUT_MS = 5_000;
+const BACKEND_STATUS_OUTPUT_LIMIT = 8 * 1024;
 const alignmentTypes = new Set([
   "auto",
   "dpo",
@@ -41,6 +43,19 @@ const targetModules = new Set([
   "mlp.up_proj",
   "mlp.down_proj",
 ]);
+
+export function osAiVersionFromOutput(output: string) {
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+/g, " ").trim();
+    if (
+      /^osai\s+v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/i.test(
+        line,
+      )
+    )
+      return line.slice(0, 120);
+  }
+  return "";
+}
 const splitModes = new Set(["auto", "none", "layer", "row", "tensor"]);
 const defaultModelsRoot = path.join(os.homedir(), "osAi", "models");
 
@@ -974,21 +989,67 @@ export class SessionService {
   ) {}
 
   async backendStatus(): Promise<BackendStatus> {
-    const executable = (await this.preferences()).backendExecutable || "osai";
+    let executable = "osai";
+    try {
+      executable = (await this.preferences()).backendExecutable || executable;
+    } catch (error) {
+      return {
+        available: false,
+        executable,
+        version: "",
+        message: `Could not read the saved osAi CLI setting: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     return new Promise((resolve) => {
-      const child = spawn(executable, ["--version"], {
-        shell: false,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      let settled = false;
+      let timer: NodeJS.Timeout | undefined;
       let output = "";
-      const timer = setTimeout(() => child.kill(), 8_000);
+      const finish = (status: BackendStatus) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(status);
+      };
+      const appendOutput = (chunk: Buffer) => {
+        if (output.length >= BACKEND_STATUS_OUTPUT_LIMIT) return;
+        output += chunk
+          .toString("utf8")
+          .slice(0, BACKEND_STATUS_OUTPUT_LIMIT - output.length);
+      };
+      let child;
+      try {
+        child = spawn(executable, ["--version"], {
+          shell: false,
+          windowsHide: true,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (error) {
+        finish({
+          available: false,
+          executable,
+          version: "",
+          message: `osAi CLI could not start: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        return;
+      }
+      timer = setTimeout(() => {
+        finish({
+          available: false,
+          executable,
+          version: "",
+          message: "osAi CLI did not respond within 5 seconds",
+        });
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // The status check has already completed; process cleanup is best effort.
+        }
+      }, BACKEND_STATUS_TIMEOUT_MS);
       timer.unref();
-      child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
-      child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      child.stdout.on("data", appendOutput);
+      child.stderr.on("data", appendOutput);
       child.once("error", (error) => {
-        clearTimeout(timer);
-        resolve({
+        finish({
           available: false,
           executable,
           version: "",
@@ -999,16 +1060,25 @@ export class SessionService {
         });
       });
       child.once("close", (code) => {
-        clearTimeout(timer);
-        const version = output.trim().slice(0, 120);
-        resolve({
-          available: code === 0,
+        const version = osAiVersionFromOutput(output);
+        if (code === 0 && version) {
+          finish({
+            available: true,
+            executable,
+            version,
+            message: version,
+          });
+          return;
+        }
+        finish({
+          available: false,
           executable,
-          version: code === 0 ? version : "",
+          version: "",
           message:
             code === 0
-              ? version
-              : output.trim().slice(-240) || `osAi exited with ${code}`,
+              ? "The selected executable is not the osAi CLI"
+              : output.replace(/\s+/g, " ").trim().slice(-240) ||
+                `osAi CLI exited with code ${code ?? "unknown"}`,
         });
       });
     });

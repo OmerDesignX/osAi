@@ -215,17 +215,14 @@ function registerIpc() {
   });
   ipcMain.handle("backend:status", async () => {
     const status = await sessionService.backendStatus();
-    if (
-      !status.available ||
-      (await backendInstaller.isCurrent(status.executable))
-    )
-      return status;
-    const installed = await backendInstaller.install();
-    if (installed.state === "ready") return sessionService.backendStatus();
+    if (!status.available) return status;
+    if (await backendInstaller.isCurrent(status.executable)) return status;
     return {
       ...status,
       available: false,
-      message: installed.message,
+      version: "",
+      message:
+        "The installed osAi CLI needs an update. Choose Install locally.",
     };
   });
   ipcMain.handle("backend-install:status", () => backendInstaller.getStatus());

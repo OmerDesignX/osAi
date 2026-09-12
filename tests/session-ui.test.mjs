@@ -31,6 +31,24 @@ test("notifications reveal complete cleaned error details", async () => {
   assert.match(app, /<pre>\{notice\}<\/pre>/);
 });
 
+test("backend detection is bounded, honest, and never silently installs", async () => {
+  const [app, service, main] = await Promise.all([
+    fs.readFile("src/App.tsx", "utf8"),
+    fs.readFile("electron/main/session-service.ts", "utf8"),
+    fs.readFile("electron/main/index.ts", "utf8"),
+  ]);
+  assert.match(service, /BACKEND_STATUS_TIMEOUT_MS\s*=\s*5_000/);
+  assert.match(service, /The selected executable is not the osAi CLI/);
+  assert.match(app, /backendCheckRef/);
+  assert.match(app, /Not connected/);
+  assert.doesNotMatch(app, /setInterval\(\(\) => void refreshBackend/);
+  const statusHandler = main.slice(
+    main.indexOf('ipcMain.handle("backend:status"'),
+    main.indexOf('ipcMain.handle("backend-install:status"'),
+  );
+  assert.doesNotMatch(statusHandler, /backendInstaller\.install/);
+});
+
 test("live output follows only at the bottom and offers a subtle latest control", async () => {
   const [app, styles] = await Promise.all([
     fs.readFile("src/App.tsx", "utf8"),

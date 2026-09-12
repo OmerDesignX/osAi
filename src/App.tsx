@@ -232,6 +232,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState("");
   const [log, setLog] = useState("");
   const [backend, setBackend] = useState<BackendStatus | null>(null);
+  const [backendChecking, setBackendChecking] = useState(false);
   const [backendInstall, setBackendInstall] = useState(fallbackBackendInstall);
   const [update, setUpdate] = useState(fallbackUpdate);
   const [notice, setNotice] = useState("");
@@ -259,6 +260,7 @@ export function App() {
   const logRef = useRef<HTMLPreElement | null>(null);
   const followLogRef = useRef(true);
   const selectionClearedRef = useRef(false);
+  const backendCheckRef = useRef<Promise<BackendStatus> | null>(null);
 
   const selected = useMemo(
     () => sessions.find((session) => session.id === selectedId) || null,
@@ -289,8 +291,27 @@ export function App() {
     );
   }, []);
 
-  const refreshBackend = useCallback(async () => {
-    setBackend(await window.osai.backendStatus());
+  const refreshBackend = useCallback(() => {
+    if (backendCheckRef.current) return backendCheckRef.current;
+    setBackendChecking(true);
+    const request = window.osai
+      .backendStatus()
+      .catch((error): BackendStatus => ({
+        available: false,
+        executable: "osai",
+        version: "",
+        message: readableError(error) || "The osAi CLI could not be checked",
+      }))
+      .then((status) => {
+        setBackend(status);
+        return status;
+      })
+      .finally(() => {
+        backendCheckRef.current = null;
+        setBackendChecking(false);
+      });
+    backendCheckRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
@@ -325,12 +346,6 @@ export function App() {
       removeBackendInstallListener();
     };
   }, [refreshBackend, refreshSessions]);
-
-  useEffect(() => {
-    if (backend?.available) return;
-    const interval = window.setInterval(() => void refreshBackend(), 2_500);
-    return () => window.clearInterval(interval);
-  }, [backend?.available, refreshBackend]);
 
   useEffect(() => setNoticeExpanded(false), [notice]);
 
@@ -440,6 +455,16 @@ export function App() {
   const savePreferences = async (next: Preferences) => {
     setPreferences(next);
     setPreferences(await window.osai.savePreferences(next));
+  };
+
+  const saveAndCheckBackend = async (next: Preferences) => {
+    setNotice("");
+    try {
+      await savePreferences(next);
+      await refreshBackend();
+    } catch (error) {
+      setNotice(readableError(error));
+    }
   };
 
   const setTheme = (theme: Theme) => {
@@ -1949,23 +1974,29 @@ export function App() {
             </p>
             <button
               className="primary-button onboarding-download"
-              disabled={backend === null || backendInstallBusy}
+              disabled={
+                backend === null || backendChecking || backendInstallBusy
+              }
               onClick={() => void downloadBackend()}
             >
               <Icon
                 name={
-                  backend === null || backendInstallBusy ? "loader" : "download"
+                  backend === null || backendChecking || backendInstallBusy
+                    ? "loader"
+                    : "download"
                 }
               />
-              {backend === null ? "Checking setup…" : backendInstallLabel}
+              {backend === null || backendChecking
+                ? "Checking setup…"
+                : backendInstallLabel}
             </button>
             <div className="onboarding-state">
               <span>
-                {backend === null
+                {backend === null || backendChecking
                   ? "Looking for an existing osAi CLI installation"
-                  : backendInstall.state === "idle"
-                    ? "The training workspace opens automatically when setup finishes"
-                    : backendInstall.message}
+                  : backendInstall.state !== "idle"
+                    ? backendInstall.message
+                    : backend.message}
               </span>
             </div>
           </section>
@@ -1994,9 +2025,9 @@ export function App() {
                 ? active.name + " · " + active.message
                 : backendReady
                   ? "Ready"
-                  : backend === null
+                  : backend === null || backendChecking
                     ? "Checking osAi CLI"
-                    : backendInstall.message}
+                    : backend?.message || backendInstall.message}
             </span>
           </div>
           <div className="status-track">
@@ -2232,12 +2263,27 @@ export function App() {
               </div>
               <div
                 className={
-                  "backend-status " + (backend?.available ? "ready" : "missing")
+                  "backend-status " +
+                  (backendChecking || backend === null
+                    ? "checking"
+                    : backend.available
+                      ? "ready"
+                      : "missing")
                 }
               >
                 <div>
-                  <b>{backend?.available ? "Connected" : "Not found"}</b>
-                  <small>{backend?.message || "Checking the local CLI…"}</small>
+                  <b>
+                    {backendChecking || backend === null
+                      ? "Checking…"
+                      : backend.available
+                        ? "Connected"
+                        : "Not connected"}
+                  </b>
+                  <small>
+                    {backendChecking || backend === null
+                      ? "Verifying the selected local executable"
+                      : backend.message}
+                  </small>
                 </div>
               </div>
               <label className="field">
@@ -2258,7 +2304,7 @@ export function App() {
                     onClick={async () => {
                       const value = await window.osai.chooseBackend();
                       if (value)
-                        await savePreferences({
+                        await saveAndCheckBackend({
                           ...preferences,
                           backendExecutable: value,
                         });
@@ -2272,12 +2318,11 @@ export function App() {
               <div className="button-row">
                 <button
                   className="quiet-button"
-                  onClick={() =>
-                    void savePreferences(preferences).then(refreshBackend)
-                  }
+                  disabled={backendChecking || backendInstallBusy}
+                  onClick={() => void saveAndCheckBackend(preferences)}
                 >
-                  <Icon name="check" />
-                  Save and check
+                  <Icon name={backendChecking ? "loader" : "check"} />
+                  {backendChecking ? "Checking…" : "Save and check"}
                 </button>
                 <button
                   className="quiet-button"

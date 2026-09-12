@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { BackendInstallStatus } from "../types.js";
+import { osAiVersionFromOutput } from "./session-service.js";
 
 const PYTHON_CHECK =
   "import sys; print('.'.join(map(str, sys.version_info[:3]))); " +
@@ -396,10 +397,11 @@ export class BackendInstaller {
       const check = await runCommand(executable, ["--version"], {
         timeoutMs: 20_000,
       });
-      if (check.code !== 0)
+      const version = osAiVersionFromOutput(`${check.stdout}\n${check.stderr}`);
+      if (check.code !== 0 || !version)
         throw new Error(
           check.stderr.trim() ||
-            "The installed osAi CLI did not start correctly",
+            "The installed executable did not identify itself as the osAi CLI",
         );
       await fs.writeFile(
         path.join(installRoot, "OSAI_BACKEND_BUNDLE.json"),
@@ -409,7 +411,7 @@ export class BackendInstaller {
       await this.selectExecutable(executable);
       this.update({
         state: "ready",
-        message: `osAi ${check.stdout.trim() || "CLI"} is ready`,
+        message: `${version} is ready`,
         percent: 100,
         executable,
         sourceDirectory: source,
