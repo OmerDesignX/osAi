@@ -136,14 +136,17 @@ function lineReader(consume: (line: string) => void) {
 
 async function runWindowsProcessControl(command: "Suspend" | "Resume") {
   if (!child?.pid) throw new Error("The training process is not running");
+  const nativeMethod =
+    command === "Suspend" ? "NtSuspendProcess" : "NtResumeProcess";
+  const script = [
+    'Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public static class OsAiNativeProcessControl { [DllImport("ntdll.dll")] public static extern uint NtSuspendProcess(IntPtr handle); [DllImport("ntdll.dll")] public static extern uint NtResumeProcess(IntPtr handle); }\'',
+    `$target = Get-Process -Id ${child.pid} -ErrorAction Stop`,
+    `$status = [OsAiNativeProcessControl]::${nativeMethod}($target.Handle)`,
+    "if ($status -ne 0) { exit 1 }",
+  ].join("; ");
   const control = spawn(
     "powershell.exe",
-    [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      `${command}-Process -Id ${child.pid} -ErrorAction Stop`,
-    ],
+    ["-NoProfile", "-NonInteractive", "-Command", script],
     { windowsHide: true, stdio: "ignore" },
   );
   const code = await new Promise<number | null>((resolve, reject) => {
@@ -243,7 +246,26 @@ async function terminateTree() {
       windowsHide: true,
       stdio: "ignore",
     });
-    await new Promise<void>((resolve) => killer.once("close", () => resolve()));
+    const code = await new Promise<number | null>((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (result: number | null) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(result);
+      };
+      killer.once("error", () => finish(null));
+      killer.once("close", finish);
+      timer = setTimeout(() => {
+        killer.kill();
+        finish(null);
+      }, 2_000);
+      timer.unref();
+    });
+    if (code !== 0 || child.exitCode === null) {
+      child.kill("SIGKILL");
+    }
   } else {
     try {
       process.kill(-child.pid, "SIGTERM");
@@ -329,17 +351,51 @@ async function main() {
     state.processPid = child?.pid;
     void scheduleStateWrite(true);
   });
-  child.once("error", (error) => {
-    log.write(`\n[osAi App] ${error.message}\n`);
-    void finish("failed", null, error.message).finally(() => log.end());
-  });
-  child.once("close", (code, signal) => {
-    const status = stopping ? "stopped" : code === 0 ? "completed" : "failed";
-    const error =
-      status === "failed"
-        ? lastStderrLine || `osAi exited with ${code ?? signal ?? "an error"}`
-        : undefined;
-    void finish(status, code, error).finally(() => log.end());
+  let completing = false;
+  const closeLog = () =>
+    new Promise<void>((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      child?.stdout?.unpipe(log);
+      child?.stderr?.unpipe(log);
+      log.once("error", done);
+      log.end(done);
+      timer = setTimeout(() => {
+        log.destroy();
+        done();
+      }, 1_000);
+      timer.unref();
+    });
+  const completion = new Promise<void>((resolve, reject) => {
+    const complete = (
+      status: "completed" | "failed" | "stopped",
+      code: number | null,
+      error?: string,
+    ) => {
+      if (completing) return;
+      completing = true;
+      void closeLog()
+        .then(() => finish(status, code, error))
+        .then(resolve, reject);
+    };
+    child?.once("error", (error) => {
+      log.write(`\n[osAi App] ${error.message}\n`);
+      complete("failed", null, error.message);
+    });
+    child?.once("close", (code, signal) => {
+      const status = stopping ? "stopped" : code === 0 ? "completed" : "failed";
+      const error =
+        status === "failed"
+          ? lastStderrLine || `osAi exited with ${code ?? signal ?? "an error"}`
+          : undefined;
+      complete(status, code, error);
+    });
   });
   const stopPoll = setInterval(() => {
     void checkControlRequests();
@@ -347,7 +403,7 @@ async function main() {
   stopPoll.unref();
   process.on("SIGTERM", () => void terminateTree());
   process.on("SIGINT", () => void terminateTree());
-  await new Promise<void>((resolve) => child?.once("close", () => resolve()));
+  await completion;
   clearInterval(stopPoll);
 }
 

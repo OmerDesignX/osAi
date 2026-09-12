@@ -13,5 +13,5 @@ CI=true \
 pnpm run release:check-disk
 pnpm run format:check
 pnpm test
-NODE_OPTIONS=--max-old-space-size=4096 pnpm exec vite build
+NODE_OPTIONS=--max-old-space-size=4096 node "$ROOT/node_modules/vite/bin/vite.js" build
 

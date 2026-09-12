@@ -21,7 +21,9 @@ resolve_node() {
   fi
   for candidate in \
     "/c/Program Files/nodejs/node.exe" \
-    "$HOME/AppData/Local/Programs/nodejs/node.exe"; do
+    "$HOME/AppData/Local/Programs/nodejs/node.exe" \
+    "$HOME"/.cache/codex-runtimes/*/dependencies/node/bin/node.exe \
+    "$HOME"/.cache/codex-runtimes/*/dependencies/node/bin/node; do
     if [[ -x "$candidate" ]]; then
       printf '%s\n' "$candidate"
       return 0
@@ -42,7 +44,8 @@ resolve_pnpm() {
   fi
   for candidate in \
     "$HOME/AppData/Local/pnpm/pnpm.cmd" \
-    "/c/Program Files/nodejs/pnpm.cmd"; do
+    "/c/Program Files/nodejs/pnpm.cmd" \
+    "$HOME"/.cache/codex-runtimes/*/dependencies/bin/fallback/pnpm.cmd; do
     if [[ -f "$candidate" ]]; then
       printf '%s\n' "$candidate"
       return 0

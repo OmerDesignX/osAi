@@ -160,6 +160,33 @@ export async function makePortableMacBinaries(directory) {
   }
 }
 
+async function copyWindowsCompilerRuntimes(directory) {
+  const runtimeNames = [
+    "libc++.dll",
+    "libunwind.dll",
+    "libomp.dll",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll",
+    "libwinpthread-1.dll",
+  ];
+  const searchDirectories = [];
+  for (const compiler of [process.env.CXX, process.env.CC]) {
+    if (compiler && path.isAbsolute(compiler))
+      searchDirectories.push(path.dirname(compiler));
+  }
+  searchDirectories.push(
+    ...(process.env.PATH || "").split(path.delimiter).filter(Boolean),
+  );
+  for (const name of runtimeNames) {
+    for (const candidateDirectory of [...new Set(searchDirectories)]) {
+      const source = path.join(candidateDirectory, name);
+      if (!(await fs.stat(source).catch(() => null))?.isFile()) continue;
+      await fs.copyFile(source, path.join(directory, name));
+      break;
+    }
+  }
+}
+
 async function downloadArchive(url, destination) {
   if (!trustedBackendArchiveUrl(url))
     throw new Error("The osAi CLI source URL is not trusted");
@@ -349,6 +376,14 @@ async function compileLlama(
         verbatimSymlinks: true,
       });
     }
+    if (platform === "windows") {
+      await copyWindowsCompilerRuntimes(destination);
+      await fs.rm(path.join(cache, "bin"), { recursive: true, force: true });
+      await fs.cp(destination, path.join(cache, "bin"), {
+        recursive: true,
+        verbatimSymlinks: true,
+      });
+    }
     process.stdout.write(
       `Using verified cached llama.cpp binaries for ${target}\n`,
     );
@@ -380,6 +415,11 @@ async function compileLlama(
       "-DCMAKE_BUILD_RPATH=@loader_path",
       "-DCMAKE_INSTALL_RPATH=@loader_path",
       "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON",
+    );
+  if (platform === "windows")
+    configure.push(
+      "-DCMAKE_C_FLAGS=-D_WIN32_WINNT=0x0A00",
+      "-DCMAKE_CXX_FLAGS=-D_WIN32_WINNT=0x0A00",
     );
   try {
     await run(cmake, configure, { cwd: llamaSource });
@@ -415,6 +455,7 @@ async function compileLlama(
     verbatimSymlinks: true,
   });
   if (platform === "macos") await makePortableMacBinaries(destination);
+  if (platform === "windows") await copyWindowsCompilerRuntimes(destination);
 
   if (
     !(await validateLlamaTargets(

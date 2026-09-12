@@ -24,7 +24,7 @@
     "typecheck": "tsc -b --pretty false",
     "test": "tsc -b --pretty false && node --test tests/*.test.mjs",
     "format": "prettier --write . --ignore-unknown",
-    "format:check": "prettier --check . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown --end-of-line auto",
     "preview": "vite preview"
   },
   "dependencies": {

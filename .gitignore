@@ -10,6 +10,7 @@ build/backend-bundle/
 build/backend-source-cache/
 build/backend-native-cache/
 build/backend-wheel-cache/
+build/release-tools/
 *.tsbuildinfo
 .DS_Store
 *.log

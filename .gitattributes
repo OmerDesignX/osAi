@@ -1,0 +1,9 @@
+# Keep repository metadata and scripts consistent across platforms.
+.gitattributes text eol=lf
+.gitignore text eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+
+# Native Windows command launchers conventionally use CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf

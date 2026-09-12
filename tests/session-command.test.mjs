@@ -73,6 +73,11 @@ const base = {
 };
 
 test("resolves relative media beside an individually selected dataset", () => {
+  const sourceDirectory = path.join(
+    path.parse(process.cwd()).root,
+    "datasets",
+    "demo",
+  );
   const result = absolutizeDatasetMedia(
     {
       image: "images/a.png",
@@ -86,16 +91,16 @@ test("resolves relative media beside an individually selected dataset", () => {
         },
       ],
     },
-    "/datasets/demo",
+    sourceDirectory,
   );
-  assert.equal(result.image, "/datasets/demo/images/a.png");
+  assert.equal(result.image, path.join(sourceDirectory, "images", "a.png"));
   assert.equal(
     result.messages[0].content[0].video,
-    "/datasets/demo/clips/a.mp4",
+    path.join(sourceDirectory, "clips", "a.mp4"),
   );
   assert.equal(
     result.messages[0].content[1].audio_url.path,
-    "/datasets/demo/sound/a.wav",
+    path.join(sourceDirectory, "sound", "a.wav"),
   );
 });
 

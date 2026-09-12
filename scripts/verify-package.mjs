@@ -17,6 +17,7 @@ function run(command, args) {
     const child = spawn(command, args, {
       cwd: root,
       shell: false,
+      windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -154,6 +155,13 @@ async function verifyBackendResources(
         `The packaged llama.cpp executable requires unsupported macOS ${minimumMatch?.[1] || "unknown"}`,
       );
   }
+  if (platform === "windows") {
+    if (!llamaCompletion)
+      throw new Error("The packaged llama-completion executable is missing");
+    const version = await run(llamaCompletion, ["--version"]);
+    if (!version.includes("version:"))
+      throw new Error("The packaged llama.cpp executable did not start");
+  }
 }
 
 if (platform === "macos") {
@@ -253,7 +261,13 @@ if (platform === "macos") {
     "python",
     "python.exe",
   );
-  await requireArtifact(python, 1_000_000);
+  // The standalone Windows runtime uses a small PE launcher beside the full
+  // CPython DLL. Verify both instead of treating the launcher as the runtime.
+  await requireArtifact(python, 50_000);
+  await requireArtifact(
+    path.join(path.dirname(python), "python312.dll"),
+    1_000_000,
+  );
   const pythonVersion = await run(python, ["--version"]);
   if (!pythonVersion.startsWith("Python 3.12."))
     throw new Error(artifactName + " bundles unexpected " + pythonVersion);

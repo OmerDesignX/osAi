@@ -139,13 +139,15 @@ export async function prepareRuntime(platform, architecture) {
 
   await fs.rm(runtimeRoot, { recursive: true, force: true });
   await fs.mkdir(runtimeRoot, { recursive: true, mode: 0o700 });
-  await run("tar", [
-    "-xzf",
-    archive,
-    "-C",
-    runtimeRoot,
-    "--strip-components=1",
-  ]);
+  const tar =
+    platform === "windows" && process.platform === "win32"
+      ? path.join(
+          process.env.SystemRoot || "C:\\Windows",
+          "System32",
+          "tar.exe",
+        )
+      : "tar";
+  await run(tar, ["-xzf", archive, "-C", runtimeRoot, "--strip-components=1"]);
   const executable = runtimeExecutable(runtimeRoot, platform);
   const details = await fs.stat(executable).catch(() => null);
   if (!details?.isFile())
