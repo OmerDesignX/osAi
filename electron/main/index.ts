@@ -245,6 +245,15 @@ function registerIpc() {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.stop(id);
   });
+  ipcMain.handle(
+    "training:restart",
+    async (_event, id: unknown, value: unknown) => {
+      if (typeof id !== "string") throw new Error("Invalid training session");
+      return sessionService.restart(id, value as TrainingRequest, (directory) =>
+        shell.trashItem(directory),
+      );
+    },
+  );
   ipcMain.handle("training:delete", async (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     await sessionService.remove(id, (directory) => shell.trashItem(directory));

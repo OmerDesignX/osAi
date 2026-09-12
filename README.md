@@ -170,7 +170,7 @@ No rollout, critic, reward-model, telemetry, or internet server is started. PPO 
 
 Use **Advanced** to set:
 
-- **Optimization:** iterations, optimizer, batch size, gradient accumulation, sequence length, learning rates, and seed
+- **Optimization:** dataset epochs, optimizer, batch size, gradient accumulation, sequence length, learning rates, and seed
 - **LoRA adapter:** rank, scale, adapted layers, dropout, and target projections
 - **Media:** optional image size, video frame rate and frame cap, and assistant token ID
 - **Alignment and rollouts:** beta, gamma, PPO clipping, answers per prompt, maximum new tokens, temperature, top-p, and seed

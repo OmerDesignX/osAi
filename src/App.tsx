@@ -14,6 +14,7 @@ import type {
   TrainingStage,
 } from "./types.js";
 import osAiIcon from "./assets/osai-icon.png";
+import { TrainingWiki } from "./TrainingWiki.js";
 
 type IconName = keyof typeof feather.icons;
 
@@ -105,6 +106,11 @@ function NumberField({
 
 function statusLabel(status: SessionState["status"]) {
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function phaseLabel(phase: string) {
+  const value = phase.replaceAll("-", " ");
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function friendlyTime(value?: string) {
@@ -208,7 +214,7 @@ const fallbackPreferences: Preferences = {
 const fallbackUpdate: AppUpdateStatus = {
   state: "disabled",
   message: "Automatic updates are off",
-  currentVersion: "0.1.5",
+  currentVersion: "0.1.14",
 };
 
 const fallbackBackendInstall: BackendInstallStatus = {
@@ -238,18 +244,24 @@ export function App() {
   const [deleteCandidate, setDeleteCandidate] = useState<SessionState | null>(
     null,
   );
+  const [restartCandidate, setRestartCandidate] = useState<SessionState | null>(
+    null,
+  );
   const [deletingSession, setDeletingSession] = useState(false);
+  const [restartingSession, setRestartingSession] = useState(false);
   const [starting, setStarting] = useState(false);
   const [sessionControl, setSessionControl] = useState<
     "" | "pausing" | "resuming" | "stopping"
   >("");
+  const [showLogLatest, setShowLogLatest] = useState(false);
+  const [wikiOpen, setWikiOpen] = useState(false);
+  const [wikiActive, setWikiActive] = useState(false);
   const logRef = useRef<HTMLPreElement | null>(null);
+  const followLogRef = useRef(true);
+  const selectionClearedRef = useRef(false);
 
   const selected = useMemo(
-    () =>
-      sessions.find((session) => session.id === selectedId) ||
-      sessions[0] ||
-      null,
+    () => sessions.find((session) => session.id === selectedId) || null,
     [selectedId, sessions],
   );
   const active = sessions.find((session) =>
@@ -265,13 +277,15 @@ export function App() {
     setSelectedId((current) =>
       current && next.some((session) => session.id === current)
         ? current
-        : next.find((session) =>
-            ["queued", "running", "paused", "stopping"].includes(
-              session.status,
-            ),
-          )?.id ||
-          next[0]?.id ||
-          "",
+        : selectionClearedRef.current
+          ? ""
+          : next.find((session) =>
+              ["queued", "running", "paused", "stopping"].includes(
+                session.status,
+              ),
+            )?.id ||
+            next[0]?.id ||
+            "",
     );
   }, []);
 
@@ -343,7 +357,16 @@ export function App() {
   }, [sessionMenu]);
 
   useEffect(() => {
-    if (!selected?.request) return;
+    if (!selected) {
+      setForm({
+        ...defaults,
+        sessionsRoot: preferences.sessionsRoot,
+      });
+      setSameDataset(true);
+      setAdvanced(false);
+      return;
+    }
+    if (!selected.request) return;
     const restored = Object.fromEntries(
       Object.entries(selected.request).filter(
         ([, value]) => value !== undefined,
@@ -365,6 +388,8 @@ export function App() {
   }, [selected?.id]);
 
   useEffect(() => {
+    followLogRef.current = true;
+    setShowLogLatest(false);
     if (!selected) {
       setLog("");
       return;
@@ -383,9 +408,34 @@ export function App() {
   }, [selected?.id]);
 
   useEffect(() => {
-    if (!logRef.current) return;
-    logRef.current.scrollTop = logRef.current.scrollHeight;
+    if (!logRef.current || !followLogRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (!logRef.current || !followLogRef.current) return;
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [log]);
+
+  const handleLogScroll = () => {
+    if (!logRef.current) return;
+    const distanceFromBottom =
+      logRef.current.scrollHeight -
+      logRef.current.scrollTop -
+      logRef.current.clientHeight;
+    const atBottom = distanceFromBottom <= 24;
+    followLogRef.current = atBottom;
+    setShowLogLatest(!atBottom);
+  };
+
+  const jumpToLatestLog = () => {
+    if (!logRef.current) return;
+    followLogRef.current = true;
+    setShowLogLatest(false);
+    logRef.current.scrollTo({
+      top: logRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  };
 
   const savePreferences = async (next: Preferences) => {
     setPreferences(next);
@@ -437,6 +487,7 @@ export function App() {
         }),
       );
       const session = await window.osai.startTraining(request);
+      selectionClearedRef.current = false;
       setSelectedId(session.id);
       await refreshSessions();
     } catch (error) {
@@ -491,8 +542,8 @@ export function App() {
       return;
     }
     const bounds = button.getBoundingClientRect();
-    const width = 174;
-    const height = 58;
+    const width = 190;
+    const height = 106;
     const left = Math.min(
       window.innerWidth - width - 12,
       Math.max(12, bounds.right - width),
@@ -514,12 +565,52 @@ export function App() {
     setNotice("");
     try {
       await window.osai.deleteSession(deleteCandidate.id);
+      if (deleteCandidate.id === selectedId) {
+        selectionClearedRef.current = true;
+        setSelectedId("");
+        setLog("");
+        setForm({
+          ...defaults,
+          sessionsRoot: preferences.sessionsRoot,
+        });
+        setSameDataset(true);
+        setAdvanced(false);
+      }
       setDeleteCandidate(null);
       await refreshSessions();
     } catch (error) {
       setNotice(readableError(error));
     } finally {
       setDeletingSession(false);
+    }
+  };
+
+  const restartSession = async () => {
+    if (!restartCandidate?.request) return;
+    setRestartingSession(true);
+    setNotice("");
+    const request: TrainingRequest = {
+      ...defaults,
+      ...restartCandidate.request,
+      targetModules: Array.isArray(restartCandidate.request.targetModules)
+        ? restartCandidate.request.targetModules
+        : [],
+    };
+    try {
+      const session = await window.osai.restartSession(
+        restartCandidate.id,
+        request,
+      );
+      selectionClearedRef.current = false;
+      setRestartCandidate(null);
+      setSelectedId(session.id);
+      await refreshSessions();
+    } catch (error) {
+      setRestartCandidate(null);
+      setNotice(readableError(error));
+      await refreshSessions();
+    } finally {
+      setRestartingSession(false);
     }
   };
 
@@ -1015,7 +1106,7 @@ export function App() {
                     <div className="advanced-grid">
                       {needsFineTune && (
                         <label className="field">
-                          <span>Fine-tune iterations</span>
+                          <span>Fine-tune epochs</span>
                           <input
                             type="number"
                             min="1"
@@ -1606,16 +1697,33 @@ export function App() {
                 <Icon name="activity" />
                 <span>Training sessions</span>
               </div>
+              <button
+                type="button"
+                className={
+                  "quiet-button compact-button wiki-open-button " +
+                  (wikiActive ? "active" : "")
+                }
+                onClick={() => {
+                  setWikiOpen(true);
+                  setWikiActive(true);
+                  setSessionMenu(null);
+                }}
+              >
+                <Icon name="book-open" />
+                Wiki
+              </button>
             </header>
 
-            {sessions.length > 0 && (
+            {(sessions.length > 0 || wikiOpen) && (
               <div className="session-tabs" role="tablist">
-                {sessions.slice(0, 6).map((session) => (
+                {sessions.map((session) => (
                   <div
                     key={session.id}
                     className={
                       "session-tab " +
-                      (selected?.id === session.id ? "active " : "") +
+                      (!wikiActive && selected?.id === session.id
+                        ? "active "
+                        : "") +
                       session.status
                     }
                   >
@@ -1623,8 +1731,10 @@ export function App() {
                       type="button"
                       className="session-tab-select"
                       role="tab"
-                      aria-selected={selected?.id === session.id}
+                      aria-selected={!wikiActive && selected?.id === session.id}
                       onClick={() => {
+                        setWikiActive(false);
+                        selectionClearedRef.current = false;
                         setSelectedId(session.id);
                         setSessionMenu(null);
                       }}
@@ -1648,6 +1758,43 @@ export function App() {
                     </button>
                   </div>
                 ))}
+                {wikiOpen && (
+                  <div
+                    className={
+                      "session-tab wiki-session-tab " +
+                      (wikiActive ? "active" : "")
+                    }
+                  >
+                    <button
+                      type="button"
+                      className="session-tab-select"
+                      role="tab"
+                      aria-selected={wikiActive}
+                      onClick={() => {
+                        setWikiActive(true);
+                        setSessionMenu(null);
+                      }}
+                    >
+                      <Icon name="book-open" />
+                      <span>
+                        <b>Wiki</b>
+                        <small>Training guide</small>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="session-tab-more wiki-tab-close"
+                      aria-label="Close Wiki"
+                      title="Close Wiki"
+                      onClick={() => {
+                        setWikiOpen(false);
+                        setWikiActive(false);
+                      }}
+                    >
+                      <Icon name="x" size={15} />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1660,6 +1807,32 @@ export function App() {
                   aria-label={`Options for ${sessionMenuSession.name}`}
                   style={{ top: sessionMenu.top, left: sessionMenu.left }}
                 >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={
+                      !sessionMenuSession.request ||
+                      ["queued", "running", "paused", "stopping"].includes(
+                        sessionMenuSession.status,
+                      )
+                    }
+                    title={
+                      ["queued", "running", "paused", "stopping"].includes(
+                        sessionMenuSession.status,
+                      )
+                        ? "Stop this session before restarting it"
+                        : sessionMenuSession.request
+                          ? "Clear this pipeline and restart with its saved settings"
+                          : "This session does not contain restorable settings"
+                    }
+                    onClick={() => {
+                      setRestartCandidate(sessionMenuSession);
+                      setSessionMenu(null);
+                    }}
+                  >
+                    <Icon name="rotate-ccw" />
+                    Restart session
+                  </button>
                   <button
                     type="button"
                     className="danger"
@@ -1689,13 +1862,15 @@ export function App() {
                 document.querySelector(".app") || document.body,
               )}
 
-            {selected ? (
+            {wikiActive ? (
+              <TrainingWiki />
+            ) : selected ? (
               <div className="session-detail">
                 <header className="session-summary">
                   <div>
                     <h2>{selected.name}</h2>
                     <p>
-                      {selected.message} · {selected.phase.replace("-", " ")} ·{" "}
+                      {selected.message} · {phaseLabel(selected.phase)} ·{" "}
                       {friendlyTime(selected.startedAt || selected.createdAt)}
                     </p>
                   </div>
@@ -1703,23 +1878,48 @@ export function App() {
                 </header>
                 <div className="inline-progress">
                   <span
-                    className={selected.indeterminate ? "indeterminate" : ""}
                     style={{ width: Math.max(2, selected.progress) + "%" }}
                   />
                 </div>
                 {selected.error && (
                   <div className="session-error">
                     <Icon name="alert-triangle" />
-                    {selected.error}
+                    <span>{selected.error}</span>
+                    {selected.status === "failed" && selected.request && (
+                      <button
+                        type="button"
+                        onClick={() => setRestartCandidate(selected)}
+                        title="Clear this pipeline and restart with its saved settings"
+                      >
+                        <Icon name="rotate-ccw" />
+                        Restart session
+                      </button>
+                    )}
                   </div>
                 )}
                 <div className="log-heading">
                   <span>Live output</span>
-                  <small>{selected.command}</small>
                 </div>
-                <pre className="training-log" ref={logRef}>
-                  {log || "Waiting for osAi output…"}
-                </pre>
+                <div className="training-log-shell">
+                  <pre
+                    className="training-log"
+                    ref={logRef}
+                    onScroll={handleLogScroll}
+                  >
+                    {log || "Waiting for osAi output…"}
+                  </pre>
+                  {showLogLatest && (
+                    <button
+                      type="button"
+                      className="log-latest-button"
+                      onClick={jumpToLatestLog}
+                      aria-label="Jump to latest output"
+                      title="Jump to latest output"
+                    >
+                      <Icon name="arrow-down" size={15} />
+                    </button>
+                  )}
+                </div>
                 <p className="detached-note">
                   <Icon name="power" />
                   Training continues in a detached local worker when this app is
@@ -1802,9 +2002,9 @@ export function App() {
           <div className="status-track">
             <span
               className={
-                active?.indeterminate ||
-                (backendInstallBusy &&
-                  typeof backendInstall.percent !== "number")
+                !active &&
+                backendInstallBusy &&
+                typeof backendInstall.percent !== "number"
                   ? "indeterminate"
                   : ""
               }
@@ -1867,6 +2067,61 @@ export function App() {
                 onClick={() => setNoticeExpanded(false)}
               >
                 Close
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {restartCandidate && (
+        <div
+          className="app-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !restartingSession)
+              setRestartCandidate(null);
+          }}
+        >
+          <section
+            className="app-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="restart-session-title"
+          >
+            <header>
+              <div>
+                <h2 id="restart-session-title">Clear pipeline and restart?</h2>
+                <p>
+                  “{restartCandidate.name}” will be erased before a new run
+                  starts with the same settings. Its current folder and outputs
+                  will be moved to Trash.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close"
+                disabled={restartingSession}
+                onClick={() => setRestartCandidate(null)}
+              >
+                <Icon name="x" />
+              </button>
+            </header>
+            <footer>
+              <button
+                type="button"
+                disabled={restartingSession}
+                onClick={() => setRestartCandidate(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={restartingSession}
+                onClick={() => void restartSession()}
+              >
+                {restartingSession ? "Restarting…" : "Clear and restart"}
               </button>
             </footer>
           </section>

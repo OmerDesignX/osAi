@@ -18,6 +18,7 @@ const runtimeRoot = path.join(root, "build", "python-runtime");
 const bundleRoot = path.join(root, "build", "backend-bundle");
 const cacheRoot = path.join(root, "build", "backend-source-cache");
 const nativeCacheRoot = path.join(root, "build", "backend-native-cache");
+const wheelCacheRoot = path.join(root, "build", "backend-wheel-cache");
 const workRoot = path.join(root, "build", "backend-bundle-work");
 const MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024;
 const NATIVE_CACHE_SCHEMA = 3;
@@ -453,6 +454,19 @@ async function prepareWheelhouse(source, platform, architecture) {
     );
   const wheelhouse = path.join(bundleRoot, "wheelhouse");
   await fs.mkdir(wheelhouse, { recursive: true });
+  const wheelCache = path.join(
+    wheelCacheRoot,
+    bundleTarget(platform, architecture),
+  );
+  const hasWheelCache = (
+    await fs.stat(wheelCache).catch(() => null)
+  )?.isDirectory();
+  if (hasWheelCache) {
+    await fs.cp(wheelCache, wheelhouse, { recursive: true });
+    process.stdout.write(
+      `Using cached Python wheels for ${bundleTarget(platform, architecture)}\n`,
+    );
+  }
   const downloads =
     platform === "macos" && architecture === "arm64"
       ? [
@@ -479,7 +493,7 @@ async function prepareWheelhouse(source, platform, architecture) {
     );
     if (!(await fs.stat(requirements).catch(() => null))?.isFile())
       throw new Error(`Backend requirements are missing: ${requirements}`);
-    await run(python, [
+    const downloadArguments = [
       "-m",
       "pip",
       "download",
@@ -504,13 +518,34 @@ async function prepareWheelhouse(source, platform, architecture) {
       "pip",
       "setuptools",
       "wheel",
-    ]);
+    ];
+    let satisfiedByCache = false;
+    if (hasWheelCache) {
+      try {
+        await run(python, [
+          ...downloadArguments.slice(0, 4),
+          "--no-index",
+          "--find-links",
+          wheelhouse,
+          ...downloadArguments.slice(4),
+        ]);
+        satisfiedByCache = true;
+      } catch {
+        process.stdout.write(
+          `Cached Python wheels are incomplete for ${bundleTarget(platform, architecture)}; downloading only what is missing\n`,
+        );
+      }
+    }
+    if (!satisfiedByCache) await run(python, downloadArguments);
   }
   const wheels = (await fs.readdir(wheelhouse)).filter((name) =>
     name.endsWith(".whl"),
   );
   if (wheels.length < 6)
     throw new Error("The offline Python wheelhouse is incomplete");
+  await fs.rm(wheelCache, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(wheelCache), { recursive: true });
+  await fs.cp(wheelhouse, wheelCache, { recursive: true });
   return wheels.length;
 }
 

@@ -9,6 +9,7 @@ build/python-runtime-cache/
 build/backend-bundle/
 build/backend-source-cache/
 build/backend-native-cache/
+build/backend-wheel-cache/
 *.tsbuildinfo
 .DS_Store
 *.log

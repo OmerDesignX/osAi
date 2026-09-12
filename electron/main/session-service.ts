@@ -1,9 +1,15 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { createReadStream } from "node:fs";
+import {
+  phaseProgress,
+  recoverFineTuneProgress,
+  type TrainingStage,
+} from "./training-progress.js";
 import type {
   BackendStatus,
   Preferences,
@@ -36,6 +42,64 @@ const targetModules = new Set([
   "mlp.down_proj",
 ]);
 const splitModes = new Set(["auto", "none", "layer", "row", "tensor"]);
+const defaultModelsRoot = path.join(os.homedir(), "osAi", "models");
+
+async function readProgressLog(file: string) {
+  const handle = await fs.open(file, "r").catch(() => null);
+  if (!handle) return "";
+  try {
+    const size = (await handle.stat()).size;
+    const headLength = Math.min(size, 32 * 1024);
+    const tailLength = Math.min(Math.max(0, size - headLength), 192 * 1024);
+    const head = Buffer.alloc(headLength);
+    const tail = Buffer.alloc(tailLength);
+    await handle.read(head, 0, headLength, 0);
+    if (tailLength)
+      await handle.read(
+        tail,
+        0,
+        tailLength,
+        Math.max(headLength, size - tailLength),
+      );
+    return tailLength
+      ? `${head.toString("utf8")}\n${tail.toString("utf8")}`
+      : head.toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+async function recoverVisibleProgress(state: SessionState) {
+  if (
+    !activeStatuses.has(state.status) ||
+    state.request?.stage === "alignment" ||
+    ["alignment", "rollouts", "publishing", "complete"].includes(state.phase)
+  )
+    return state;
+  const recovered = recoverFineTuneProgress(
+    await readProgressLog(state.logPath),
+    state.request?.iterations || 1,
+  );
+  if (!recovered || recovered.completed < 1) return state;
+  const stage = (state.request?.stage || "fine-tuning") as TrainingStage;
+  const progress = Math.min(
+    99,
+    Math.round(
+      phaseProgress(recovered.completed, recovered.total, "fine-tuning", stage),
+    ),
+  );
+  if (progress <= state.progress) return state;
+  return {
+    ...state,
+    phase: "fine-tuning" as const,
+    progress,
+    indeterminate: false,
+    message:
+      state.status === "paused"
+        ? state.message
+        : `Fine-tuning update ${recovered.completed} of ${recovered.total}`,
+  };
+}
 
 function cleanName(value: string) {
   return (
@@ -208,6 +272,26 @@ export function absolutizeDatasetMedia(
   return result;
 }
 
+export function formatTerminalOutput(value: string) {
+  const withoutControls = value
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\u0008/g, "");
+  const rendered = withoutControls
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => {
+      const updates = line.split("\r");
+      return updates[updates.length - 1] || "";
+    });
+  const compact: string[] = [];
+  for (const line of rendered) {
+    if (line || compact.at(-1) !== "" || compact.at(-2) !== "")
+      compact.push(line);
+  }
+  return compact.join("\n").trimEnd();
+}
+
 async function writeJsonLines(input: string, output: string) {
   const handle = await fs.open(output, "wx", 0o600);
   const lines = readline.createInterface({
@@ -303,6 +387,7 @@ export async function prepareDatasetSelection(
 export async function buildOsAiArgs(
   input: TrainingRequest,
   sessionsRoot: string,
+  modelsRoot = defaultModelsRoot,
 ) {
   if (!["auto", "mlx", "llama.cpp"].includes(input.engine))
     throw new Error("Invalid training engine");
@@ -327,7 +412,7 @@ export async function buildOsAiArgs(
   if (input.modelSource === "official") {
     if (!["small", "medium", "large"].includes(input.tier))
       throw new Error("Invalid official model tier");
-    args.push("--tier", input.tier);
+    args.push("--tier", input.tier, "--bundled-root", modelsRoot);
   } else if (input.modelSource === "custom") {
     const folder = await assertDirectory(
       input.customModelFolder,
@@ -428,8 +513,8 @@ export async function buildOsAiArgs(
       await assertDirectory(input.fineTuneData, "Fine-tuning dataset"),
     );
     args.push(
-      "--iterations",
-      String(positiveInteger(input.iterations, "Iterations")),
+      "--epochs",
+      String(positiveInteger(input.iterations, "Fine-tune epochs")),
     );
     pushOptional(
       args,
@@ -691,7 +776,10 @@ export function restoreLegacyRequest(
       "auto") as TrainingRequest["multiGpu"],
     liveRollouts: !args.includes("--no-live-rollouts"),
     sessionName: argumentValue(args, "--session-name") || state.name,
-    iterations: numericArgument(args, "--iterations") || job.iterations,
+    iterations:
+      numericArgument(args, "--epochs") ||
+      numericArgument(args, "--iterations") ||
+      job.iterations,
     alignmentIterations:
       numericArgument(args, "--alignment-iterations") ||
       job.alignmentIterations,
@@ -1087,7 +1175,8 @@ export class SessionService {
         );
       }),
     );
-    return valid.sort((left, right) =>
+    const visible = await Promise.all(valid.map(recoverVisibleProgress));
+    return visible.sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt),
     );
   }
@@ -1111,6 +1200,45 @@ export class SessionService {
         "The training session changed before it could be deleted",
       );
     await moveToTrash(state.sessionDirectory);
+  }
+
+  async restart(
+    id: string,
+    input: TrainingRequest,
+    moveToTrash: (directory: string) => Promise<void>,
+  ) {
+    const state = await this.find(id);
+    if (activeStatuses.has(state.status))
+      throw new Error("Stop this training session before restarting it");
+    if (!state.request)
+      throw new Error("This session does not contain restorable settings");
+
+    const stateFile = path.join(state.sessionDirectory, "state.json");
+    const stored = await readState(stateFile);
+    if (!stored || stored.id !== id)
+      throw new Error(
+        "The training session changed before it could be restarted",
+      );
+
+    const sessionsRoot = await ensureSessionsRoot(
+      input.sessionsRoot || path.dirname(state.sessionDirectory),
+    );
+    const request = { ...input, sessionsRoot };
+    await buildOsAiArgs(request, sessionsRoot);
+    if (request.stage !== "alignment")
+      await assertExistingPath(request.fineTuneData, "Fine-tuning dataset");
+    if (request.stage !== "fine-tuning")
+      await assertExistingPath(request.alignmentData, "Alignment dataset");
+
+    await moveToTrash(state.sessionDirectory);
+    try {
+      return await this.start(request);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `The previous pipeline was moved to Trash, but the restart could not begin: ${detail}`,
+      );
+    }
   }
 
   async stop(id: string) {
@@ -1176,7 +1304,7 @@ export class SessionService {
       const length = Math.min(stat.size, 160 * 1024);
       const buffer = Buffer.alloc(length);
       await handle.read(buffer, 0, length, Math.max(0, stat.size - length));
-      return buffer.toString("utf8");
+      return formatTerminalOutput(buffer.toString("utf8"));
     } finally {
       await handle.close();
     }

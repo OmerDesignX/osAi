@@ -203,6 +203,7 @@ export type OsAiBridge = {
   pauseTraining(id: string): Promise<SessionState>;
   resumeTraining(id: string): Promise<SessionState>;
   stopTraining(id: string): Promise<SessionState>;
+  restartSession(id: string, value: TrainingRequest): Promise<SessionState>;
   deleteSession(id: string): Promise<void>;
   listSessions(): Promise<SessionState[]>;
   sessionLog(id: string): Promise<string>;

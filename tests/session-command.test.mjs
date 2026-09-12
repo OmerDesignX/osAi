@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   buildOsAiArgs,
   absolutizeDatasetMedia,
+  formatTerminalOutput,
   prepareDatasetSelection,
   prepareSharedFineTuneData,
   restoreLegacyRequest,
@@ -96,6 +97,14 @@ test("resolves relative media beside an individually selected dataset", () => {
     result.messages[0].content[1].audio_url.path,
     "/datasets/demo/sound/a.wav",
   );
+});
+
+test("renders carriage-return terminal progress as one current line", () => {
+  const output = formatTerminalOutput(
+    "start\n\n\r[------] 0% config.json\r[#-----] 5% model.gguf\n\x1b[31mdone\x1b[0m\n",
+  );
+  assert.equal(output, "start\n\n[#-----] 5% model.gguf\ndone");
+  assert.doesNotMatch(output, /config\.json|\x1b/);
 });
 
 test("restores settings from sessions created by earlier app builds", () => {
@@ -217,6 +226,64 @@ test("keeps current, custom, and legacy session locations discoverable", async (
   }
 });
 
+test("recovers visible MLX progress from an active session log", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-progress-log-"));
+  const directory = path.join(root, "active");
+  const id = "77777777-7777-4777-8777-777777777777";
+  const logPath = path.join(directory, "training.log");
+  await fs.mkdir(directory);
+  await fs.writeFile(
+    logPath,
+    [
+      "osai: training plan examples=15011 epochs=1 batch=1 steps=15011 optimizer_updates=15011",
+      "iter   train_loss     tok/s     tokens",
+      "3219    1.845 ▼    25    101.0k",
+    ].join("\n"),
+  );
+  await fs.writeFile(
+    path.join(directory, "state.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      name: "active",
+      status: "running",
+      phase: "preparing",
+      progress: 1,
+      indeterminate: true,
+      message: "Checking the model and local training backend",
+      createdAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      workerPid: process.pid,
+      sessionDirectory: directory,
+      logPath,
+      command: "osai train",
+      request: {
+        ...base,
+        sessionsRoot: root,
+        stage: "fine-tuning",
+        iterations: 1,
+      },
+    }),
+  );
+  const service = new SessionService(root, "unused-worker", async () => ({
+    version: 1,
+    theme: "dark",
+    backendExecutable: "",
+    autoUpdateEnabled: false,
+    sessionsRoot: root,
+    sessionRoots: [],
+  }));
+  try {
+    const [session] = await service.list();
+    assert.equal(session.progress, 25);
+    assert.equal(session.phase, "fine-tuning");
+    assert.equal(session.indeterminate, false);
+    assert.equal(session.message, "Fine-tuning update 3219 of 15011");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("moves finished sessions to Trash and protects active sessions", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-delete-session-"));
   const completedDirectory = path.join(root, "completed");
@@ -267,6 +334,72 @@ test("moves finished sessions to Trash and protects active sessions", async () =
       service.remove(activeId, async () => undefined),
       /Stop this training session before deleting it/,
     );
+    await assert.rejects(
+      service.restart(activeId, base, async () => undefined),
+      /Stop this training session before restarting it/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("restart clears the previous pipeline before launching saved settings", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "osai-restart-session-"),
+  );
+  const directory = path.join(root, "failed");
+  const dataset = path.join(root, "dataset");
+  const id = "55555555-5555-4555-8555-555555555555";
+  const request = {
+    ...base,
+    sessionsRoot: root,
+    stage: "fine-tuning",
+    fineTuneData: dataset,
+    alignmentData: "",
+  };
+  await fs.mkdir(directory);
+  await fs.mkdir(dataset);
+  await fs.writeFile(
+    path.join(directory, "state.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      name: "failed",
+      status: "failed",
+      phase: "preparing",
+      progress: 1,
+      indeterminate: false,
+      message: "failed",
+      error: "stale output lock",
+      createdAt: new Date().toISOString(),
+      sessionDirectory: directory,
+      logPath: path.join(directory, "training.log"),
+      command: "osai train",
+      request,
+    }),
+  );
+  const service = new SessionService(root, "unused-worker", async () => ({
+    version: 1,
+    theme: "dark",
+    backendExecutable: "",
+    autoUpdateEnabled: false,
+    sessionsRoot: root,
+    sessionRoots: [],
+  }));
+  const events = [];
+  service.start = async (input) => {
+    events.push(["start", input]);
+    return { id: "replacement" };
+  };
+  try {
+    const restarted = await service.restart(id, request, async (target) => {
+      events.push(["trash", target]);
+    });
+    assert.equal(restarted.id, "replacement");
+    assert.equal(events[0][0], "trash");
+    assert.equal(events[0][1], directory);
+    assert.equal(events[1][0], "start");
+    assert.deepEqual(events[1][1], request);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -357,6 +490,7 @@ test("builds a non-interactive combined osAi command with local rollouts", async
     const { args, sessionName } = await buildOsAiArgs(
       { ...base, fineTuneData: fine, alignmentData: align },
       path.join(root, "sessions"),
+      path.join(root, "models"),
     );
     assert.deepEqual(args.slice(0, 3), ["train", "--tier", "small"]);
     assert.equal(args.includes("--auto-settings"), true);
@@ -364,6 +498,10 @@ test("builds a non-interactive combined osAi command with local rollouts", async
     assert.equal(args[args.indexOf("--alignment-type") + 1], "grpo");
     assert.equal(args[args.indexOf("--data") + 1], fine);
     assert.equal(args[args.indexOf("--alignment-data") + 1], align);
+    assert.equal(
+      args[args.indexOf("--bundled-root") + 1],
+      path.join(root, "models"),
+    );
     assert.equal(sessionName, "My-safe-run");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -418,6 +556,8 @@ test("passes organized manual training, rollout, and runtime controls", async ()
     );
     const value = (flag) => args[args.indexOf(flag) + 1];
     assert.equal(value("--batch-size"), "3");
+    assert.equal(value("--epochs"), "2");
+    assert.equal(args.includes("--iterations"), false);
     assert.equal(value("--gradient-accumulation-steps"), "4");
     assert.equal(args.includes("--no-gradient-checkpointing"), true);
     assert.equal(value("--max-seq-length"), "512");

@@ -3,6 +3,11 @@ import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SessionState, WorkerJob } from "../types.js";
+import {
+  cleanTerminalLine,
+  FineTuneProgressParser,
+  phaseProgress,
+} from "./training-progress.js";
 
 const jobPath = process.argv[2];
 if (!jobPath || !path.isAbsolute(jobPath)) process.exit(2);
@@ -21,6 +26,7 @@ let finalised = false;
 let lastStderrLine = "";
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
 let writeChain = Promise.resolve();
+let fineTuneProgress: FineTuneProgressParser;
 
 async function atomicStateWrite() {
   const snapshot = JSON.stringify(state, null, 2);
@@ -47,27 +53,28 @@ function clamp(value: number) {
   return Math.max(state.progress, Math.min(99, Math.round(value)));
 }
 
-function phaseProgress(
-  completed: number,
-  total: number,
-  phase: "fine-tuning" | "alignment",
-) {
-  const ratio = Math.max(0, Math.min(1, completed / Math.max(1, total)));
-  if (job.stage === "fine-tune-align")
-    return phase === "fine-tuning" ? 5 + ratio * 58 : 72 + ratio * 25;
-  return 5 + ratio * 92;
-}
-
 function consumeLine(raw: string) {
-  const line = raw.replace(/\x1b\[[0-9;]*m/g, "").trim();
+  const line = cleanTerminalLine(raw);
   if (!line) return;
   const lower = line.toLowerCase();
   const percent = /(?:^|\s)(\d{1,3})%(?:\s|$)/.exec(line);
-  if (lower.includes("download") && percent) {
+  const byteProgress =
+    /\b\d+(?:\.\d+)?(?:B|KiB|MiB|GiB)\s*\/\s*\d+(?:\.\d+)?(?:B|KiB|MiB|GiB)\b/i.exec(
+      line,
+    );
+  if ((lower.includes("download") || byteProgress) && percent) {
     state.phase = "download";
     state.indeterminate = false;
     state.progress = clamp(2 + Math.min(100, Number(percent[1])) * 0.03);
-    state.message = line.slice(0, 240);
+    const item = line
+      .replace(/^.*?\b\d{1,3}%\s+\S+\s*/, "")
+      .trim()
+      .slice(0, 180);
+    state.message = item
+      ? item.toLowerCase().includes("catalogue")
+        ? "Checking the model catalogue"
+        : `Downloading ${item}${byteProgress ? ` · ${byteProgress[0].replace(/\s/g, "")}` : ""}`
+      : "Downloading model files";
   } else if (
     lower.includes("rollout_source=") ||
     lower.includes("live rollout")
@@ -78,24 +85,27 @@ function consumeLine(raw: string) {
     state.message = "Generating and scoring fresh answers locally";
   } else {
     const alignment = /alignment_step\s*=\s*(\d+)/i.exec(line);
-    const iteration =
-      /\b(?:iter|iteration|epoch)\s*[=:]?\s*(\d+)(?:\s*\/\s*(\d+))?/i.exec(
-        line,
-      );
+    const training = fineTuneProgress.consume(line);
     if (alignment) {
       const completed = Number(alignment[1]);
       state.phase = "alignment";
       state.indeterminate = false;
       state.progress = clamp(
-        phaseProgress(completed, job.alignmentIterations, "alignment"),
+        phaseProgress(
+          completed,
+          job.alignmentIterations,
+          "alignment",
+          job.stage,
+        ),
       );
       state.message = `Alignment update ${completed} of ${job.alignmentIterations}`;
-    } else if (iteration && state.phase !== "alignment") {
-      const completed = Number(iteration[1]);
-      const total = Number(iteration[2] || job.iterations);
+    } else if (training && state.phase !== "alignment") {
+      const { completed, total } = training;
       state.phase = "fine-tuning";
       state.indeterminate = false;
-      state.progress = clamp(phaseProgress(completed, total, "fine-tuning"));
+      state.progress = clamp(
+        phaseProgress(completed, total, "fine-tuning", job.stage),
+      );
       state.message = `Fine-tuning update ${completed} of ${total}`;
     } else if (lower.includes("publish") || lower.includes("fusion")) {
       state.phase = "publishing";
@@ -109,7 +119,7 @@ function consumeLine(raw: string) {
 
 function consumeStderrLine(raw: string) {
   consumeLine(raw);
-  const line = raw.replace(/\x1b\[[0-9;]*m/g, "").trim();
+  const line = cleanTerminalLine(raw);
   if (!line) return;
   lastStderrLine = line.replace(/^osai:\s*/i, "").slice(0, 1000);
 }
@@ -281,6 +291,7 @@ async function main() {
   state = JSON.parse(await fs.readFile(job.statePath, "utf8")) as SessionState;
   if (job.schemaVersion !== 1 || state.id !== job.id)
     throw new Error("Invalid training job");
+  fineTuneProgress = new FineTuneProgressParser(job.iterations);
   state.status = "running";
   state.startedAt = new Date().toISOString();
   state.workerPid = process.pid;
