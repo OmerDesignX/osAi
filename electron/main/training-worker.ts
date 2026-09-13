@@ -24,6 +24,8 @@ let paused = false;
 let pausedIndeterminate = false;
 let finalised = false;
 let lastStderrLine = "";
+let actionableStderrLine = "";
+let actionableStderrScore = 0;
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
 let writeChain = Promise.resolve();
 let fineTuneProgress: FineTuneProgressParser;
@@ -122,6 +124,19 @@ function consumeStderrLine(raw: string) {
   const line = cleanTerminalLine(raw);
   if (!line) return;
   lastStderrLine = line.replace(/^osai:\s*/i, "").slice(0, 1000);
+  const lower = lastStderrLine.toLowerCase();
+  const score =
+    /\b(missing|unsupported|invalid|failed|failure|error|cannot|could not|exceeds|required|locked)\b/.test(
+      lower,
+    ) && !/^command exited with status\b/.test(lower)
+      ? 2
+      : /^command exited with status\b/.test(lower)
+        ? 0
+        : 1;
+  if (score >= actionableStderrScore) {
+    actionableStderrLine = lastStderrLine;
+    actionableStderrScore = score;
+  }
 }
 
 function lineReader(consume: (line: string) => void) {
@@ -392,7 +407,9 @@ async function main() {
       const status = stopping ? "stopped" : code === 0 ? "completed" : "failed";
       const error =
         status === "failed"
-          ? lastStderrLine || `osAi exited with ${code ?? signal ?? "an error"}`
+          ? actionableStderrLine ||
+            lastStderrLine ||
+            `osAi exited with ${code ?? signal ?? "an error"}`
           : undefined;
       complete(status, code, error);
     });

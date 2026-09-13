@@ -9,11 +9,13 @@ import {
 } from "electron";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { Preferences, TrainingRequest } from "../types.js";
 import { BackendInstaller } from "./backend-installer.js";
 import { readPreferences, writePreferences } from "./preferences.js";
 import { SessionService } from "./session-service.js";
+import { inspectDataset, saveDataset } from "./dataset-editor.js";
 import { AppUpdateService } from "./updater.js";
 
 const gotLock = app.requestSingleInstanceLock();
@@ -147,6 +149,12 @@ async function preferences() {
 }
 
 function registerIpc() {
+  ipcMain.handle("system:hardware", () => ({
+    platform: process.platform,
+    architecture: process.arch,
+    physicalMemoryBytes: os.totalmem(),
+    logicalCpuCount: Math.max(1, os.cpus().length),
+  }));
   ipcMain.handle("preferences:get", () => preferences());
   ipcMain.handle("preferences:set", async (_event, value: unknown) => {
     const saved = await writePreferences(
@@ -213,6 +221,13 @@ function registerIpc() {
     });
     return result.canceled ? "" : result.filePaths[0] || "";
   });
+  ipcMain.handle("dataset:inspect", (_event, source: unknown) => {
+    if (typeof source !== "string") throw new Error("Invalid dataset source");
+    return inspectDataset(source);
+  });
+  ipcMain.handle("dataset:save", (_event, value: unknown) =>
+    saveDataset(value as Parameters<typeof saveDataset>[0]),
+  );
   ipcMain.handle("backend:status", async () => {
     const status = await sessionService.backendStatus();
     if (!status.available) return status;

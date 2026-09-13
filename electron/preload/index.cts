@@ -9,6 +9,7 @@ import type {
 
 const bridge: OsAiBridge = {
   platform: process.platform,
+  hardwareInfo: () => ipcRenderer.invoke("system:hardware"),
   loadPreferences: () => ipcRenderer.invoke("preferences:get"),
   savePreferences: (value: Preferences) =>
     ipcRenderer.invoke("preferences:set", value),
@@ -19,6 +20,9 @@ const bridge: OsAiBridge = {
   chooseFile: (title: string) =>
     ipcRenderer.invoke("dialog:choose-file", title),
   chooseBackend: () => ipcRenderer.invoke("dialog:choose-backend"),
+  inspectDataset: (source: string) =>
+    ipcRenderer.invoke("dataset:inspect", source),
+  saveDataset: (value) => ipcRenderer.invoke("dataset:save", value),
   backendStatus: () => ipcRenderer.invoke("backend:status"),
   backendInstallStatus: () => ipcRenderer.invoke("backend-install:status"),
   installBackend: () => ipcRenderer.invoke("backend-install:start"),

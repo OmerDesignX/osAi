@@ -32,6 +32,11 @@ Supported training modes:
 
 Both engines use reverse-mode gradients and update only LoRA adapter tensors. **Auto** uses AdamW for MLX and SGD for llama.cpp. The quantized base is never dequantized or requantized during training or publication.
 
+For hybrid GGUF architectures, osAi selects each LoRA projection from the
+blocks where that tensor actually exists instead of assuming every block has
+attention weights. Long supervised records are trimmed from prompt context
+while retaining answer labels; plain-text corpora remain fully trainable.
+
 ## Hardware support
 
 | System                                    | Engines                                                          |
@@ -68,15 +73,16 @@ While a run is active, **Start training** becomes **Pause training** and **Stop 
 
 Choose a single `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `train.jsonl` with optional `valid.jsonl` and `test.jsonl` splits. JSON arrays and objects containing `train`, `data`, `records`, `examples`, or `items` arrays are unpacked automatically.
 
-| Dataset layout                  | Accepted fields                                                            |
-| ------------------------------- | -------------------------------------------------------------------------- |
-| Language modelling              | `text`                                                                     |
-| Completion                      | string or conversational `prompt` + `completion`                           |
-| Chat and tools                  | OpenAI `messages`, content parts, `tools`, and `tool_calls`                |
-| ShareGPT and dialogue           | `conversations`, `conversation`, `dialog`, or `dialogue`                   |
-| Instruction                     | Alpaca `instruction/input/output` and Dolly `instruction/context/response` |
-| QA and translation              | `question/answer`, `query/response`, `source/target`, and `src/tgt`        |
-| Preference used for fine-tuning | `prompt` + `chosen/rejected`; the chosen answer becomes the target         |
+| Dataset layout                  | Accepted fields                                                                                |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Language modelling              | `text`                                                                                         |
+| Completion                      | string or conversational `prompt` + `completion`                                               |
+| Chat and tools                  | OpenAI `messages`, content parts, `tools`, and `tool_calls`                                    |
+| ShareGPT and dialogue           | `conversations`, `conversation`, `dialog`, `dialogue`, `chat`, or `turns`                      |
+| Instruction                     | Alpaca `instruction/input/output` and Dolly `instruction/context/response`                     |
+| QA and translation              | SQuAD answers, `question/answer`, translation dictionaries, and source/target pairs            |
+| Common task pairs               | Problem/solution, request/response, document/summary, article/highlights, and description/code |
+| Preference used for fine-tuning | `prompt` + `chosen/rejected`; the chosen answer becomes the target                             |
 
 Equivalent supervised layouts may be mixed in one split. osAi checks every row
 and converts it to one canonical local dataset. Image, audio, video, and
@@ -84,6 +90,17 @@ multimodal content-part layouts are passed to a complete local quantized MLX VLM
 Relative paths resolve beside the selected dataset file. The App copies the
 dataset and resolves its media references into the session, and it never fetches
 a media URL from a dataset.
+
+Press **Data editor** above the session tabs, or **Inspect or repair training
+data** in the Data section, to scan a complete dataset before training. It
+shows recognized and invalid rows, inferred fields, duplicate counts,
+modalities, and a token-limit recommendation. Unfamiliar columns can be mapped
+to prompts, answers, conversations, preferences, rewards, or raw text. You can
+repair previewed JSON rows, create validation and test splits, and save a clean
+canonical copy without changing the source data. Selecting **Use for
+fine-tuning** or **Use for alignment** returns that copy to the training form;
+hardware fitting treats the recommended token length as a request and keeps its
+RAM-safe limit as the upper bound.
 
 Choose a complete VLM under **Custom model** for media training. For a GGUF VLM,
 the same custom model folder must also contain its matching quantized MLX VLM;

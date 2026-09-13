@@ -1,5 +1,6 @@
 if (process.argv.includes("--fail")) {
   process.stderr.write("osai: unsupported dataset schema at train.jsonl:1\n");
+  process.stderr.write("osai: command exited with status 2; see log\n");
   process.exit(2);
 }
 

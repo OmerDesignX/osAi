@@ -129,6 +129,92 @@ export type BackendStatus = {
   message: string;
 };
 
+export type HardwareInfo = {
+  platform: string;
+  architecture: string;
+  physicalMemoryBytes: number;
+  logicalCpuCount: number;
+};
+
+export type DatasetTask =
+  "auto" | "supervised" | "preference" | "reward" | "text";
+
+export type DatasetFieldMapping = {
+  messages: string;
+  prompt: string;
+  context: string;
+  response: string;
+  chosen: string;
+  rejected: string;
+  reward: string;
+  text: string;
+};
+
+export type DatasetIssue = {
+  id: string;
+  split: string;
+  line: number;
+  source: string;
+  message: string;
+};
+
+export type DatasetPreviewRow = {
+  id: string;
+  split: string;
+  line: number;
+  source: string;
+  status: "valid" | "invalid";
+  format: string;
+  estimatedTokens: number;
+  raw: Record<string, unknown>;
+  normalized?: Record<string, unknown>;
+  error?: string;
+};
+
+export type DatasetInspection = {
+  source: string;
+  files: string[];
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  blankRows: number;
+  duplicateRows: number;
+  formats: string[];
+  modalities: string[];
+  fields: string[];
+  fieldCounts: Record<string, number>;
+  recommendedTask: Exclude<DatasetTask, "auto">;
+  recommendedTokenLimit: number;
+  medianTokens: number;
+  p95Tokens: number;
+  mapping: DatasetFieldMapping;
+  issues: DatasetIssue[];
+  preview: DatasetPreviewRow[];
+  truncatedIssues: boolean;
+};
+
+export type DatasetEditorRequest = {
+  source: string;
+  outputDirectory: string;
+  task: DatasetTask;
+  mapping: DatasetFieldMapping;
+  trimWhitespace: boolean;
+  removeDuplicates: boolean;
+  skipInvalid: boolean;
+  validationPercent: number;
+  testPercent: number;
+  edits: Array<{ id: string; row: Record<string, unknown> }>;
+};
+
+export type DatasetEditorResult = {
+  outputDirectory: string;
+  writtenRows: number;
+  skippedRows: number;
+  duplicateRows: number;
+  splitCounts: Record<string, number>;
+  inspection: DatasetInspection;
+};
+
 export type BackendInstallStatus = {
   state:
     | "idle"
@@ -165,12 +251,15 @@ export type AppUpdateStatus = {
 
 export type OsAiBridge = {
   platform: string;
+  hardwareInfo(): Promise<HardwareInfo>;
   loadPreferences(): Promise<Preferences>;
   savePreferences(value: Preferences): Promise<Preferences>;
   chooseDirectory(title: string): Promise<string>;
   chooseDataset(title: string): Promise<string>;
   chooseFile(title: string): Promise<string>;
   chooseBackend(): Promise<string>;
+  inspectDataset(source: string): Promise<DatasetInspection>;
+  saveDataset(value: DatasetEditorRequest): Promise<DatasetEditorResult>;
   backendStatus(): Promise<BackendStatus>;
   backendInstallStatus(): Promise<BackendInstallStatus>;
   installBackend(): Promise<BackendInstallStatus>;

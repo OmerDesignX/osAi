@@ -49,6 +49,24 @@ test("backend detection is bounded, honest, and never silently installs", async 
   assert.doesNotMatch(statusHandler, /backendInstaller\.install/);
 });
 
+test("hardware fitting exposes visible presets with one toggle and reset", async () => {
+  const [app, preload, main, styles] = await Promise.all([
+    fs.readFile("src/App.tsx", "utf8"),
+    fs.readFile("electron/preload/index.cts", "utf8"),
+    fs.readFile("electron/main/index.ts", "utf8"),
+    fs.readFile("src/styles.css", "utf8"),
+  ]);
+  assert.match(app, /Fit settings to this hardware/);
+  assert.match(app, /Training token limit/);
+  assert.match(app, /applyHardwarePreset/);
+  assert.match(app, /resetAdvancedValues/);
+  assert.match(app, /Restore recommended advanced settings/);
+  assert.match(preload, /hardwareInfo:.*system:hardware/);
+  assert.match(main, /ipcMain\.handle\("system:hardware"/);
+  assert.match(main, /os\.totalmem\(\)/);
+  assert.match(styles, /\.advanced-toolbar\s*\{/);
+});
+
 test("live output follows only at the bottom and offers a subtle latest control", async () => {
   const [app, styles] = await Promise.all([
     fs.readFile("src/App.tsx", "utf8"),

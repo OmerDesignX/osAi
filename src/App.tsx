@@ -6,6 +6,7 @@ import type {
   AppUpdateStatus,
   BackendInstallStatus,
   BackendStatus,
+  HardwareInfo,
   LoraTargetModule,
   Preferences,
   SessionState,
@@ -14,6 +15,11 @@ import type {
   TrainingStage,
 } from "./types.js";
 import osAiIcon from "./assets/osai-icon.png";
+import {
+  selectHardwarePreset,
+  type HardwarePreset,
+} from "./hardware-presets.js";
+import { DataEditor } from "./DataEditor.js";
 import { TrainingWiki } from "./TrainingWiki.js";
 
 type IconName = keyof typeof feather.icons;
@@ -73,6 +79,7 @@ function NumberField({
   step = 1,
   placeholder = "Default",
   disabled = false,
+  hint,
 }: {
   label: string;
   value: number | null;
@@ -82,6 +89,7 @@ function NumberField({
   step?: number | "any";
   placeholder?: string;
   disabled?: boolean;
+  hint?: string;
 }) {
   return (
     <label className="field">
@@ -100,6 +108,7 @@ function NumberField({
           )
         }
       />
+      {hint && <small>{hint}</small>}
     </label>
   );
 }
@@ -214,13 +223,82 @@ const fallbackPreferences: Preferences = {
 const fallbackUpdate: AppUpdateStatus = {
   state: "disabled",
   message: "Automatic updates are off",
-  currentVersion: "0.1.15",
+  currentVersion: "0.1.18",
 };
 
 const fallbackBackendInstall: BackendInstallStatus = {
   state: "idle",
   message: "osAi CLI is not installed",
 };
+
+const fallbackHardware: HardwareInfo = {
+  platform: "unknown",
+  architecture: "unknown",
+  physicalMemoryBytes: 8 * 1024 ** 3,
+  logicalCpuCount: 2,
+};
+
+function applyHardwarePreset(
+  current: TrainingRequest,
+  preset: HardwarePreset,
+): TrainingRequest {
+  return {
+    ...current,
+    autoSettings: true,
+    batchSize: preset.batchSize,
+    maxSeqLength: preset.maxSeqLength,
+    numLayers: preset.numLayers,
+    rank: preset.rank,
+    ggufBatchSize: preset.ggufBatchSize,
+    ggufThreads: preset.ggufThreads,
+    targetModules: [...preset.targetModules],
+  };
+}
+
+function resetAdvancedValues(
+  current: TrainingRequest,
+  preset: HardwarePreset,
+): TrainingRequest {
+  return applyHardwarePreset(
+    {
+      ...current,
+      optimizer: defaults.optimizer,
+      iterations: defaults.iterations,
+      alignmentIterations: defaults.alignmentIterations,
+      gradientAccumulationSteps: defaults.gradientAccumulationSteps,
+      gradientCheckpoint: defaults.gradientCheckpoint,
+      learningRate: defaults.learningRate,
+      alignmentLearningRate: defaults.alignmentLearningRate,
+      scale: defaults.scale,
+      dropout: defaults.dropout,
+      imageWidth: defaults.imageWidth,
+      imageHeight: defaults.imageHeight,
+      videoFps: defaults.videoFps,
+      videoMaxFrames: defaults.videoMaxFrames,
+      assistantTokenId: defaults.assistantTokenId,
+      seed: defaults.seed,
+      saveEvery: defaults.saveEvery,
+      stepsPerReport: defaults.stepsPerReport,
+      stepsPerEval: defaults.stepsPerEval,
+      validationBatches: defaults.validationBatches,
+      maskPrompt: defaults.maskPrompt,
+      alignmentBeta: defaults.alignmentBeta,
+      alignmentGamma: defaults.alignmentGamma,
+      ppoClip: defaults.ppoClip,
+      rolloutMaxTokens: defaults.rolloutMaxTokens,
+      rolloutsPerPrompt: defaults.rolloutsPerPrompt,
+      rolloutTemperature: defaults.rolloutTemperature,
+      rolloutTopP: defaults.rolloutTopP,
+      rolloutSeed: defaults.rolloutSeed,
+      distributedWorkers: defaults.distributedWorkers,
+      splitMode: defaults.splitMode,
+      tensorSplit: defaults.tensorSplit,
+      mainGpu: defaults.mainGpu,
+      devices: defaults.devices,
+    },
+    preset,
+  );
+}
 
 export function App() {
   const [preferences, setPreferences] = useState(fallbackPreferences);
@@ -234,6 +312,7 @@ export function App() {
   const [backend, setBackend] = useState<BackendStatus | null>(null);
   const [backendChecking, setBackendChecking] = useState(false);
   const [backendInstall, setBackendInstall] = useState(fallbackBackendInstall);
+  const [hardware, setHardware] = useState(fallbackHardware);
   const [update, setUpdate] = useState(fallbackUpdate);
   const [notice, setNotice] = useState("");
   const [noticeExpanded, setNoticeExpanded] = useState(false);
@@ -257,6 +336,9 @@ export function App() {
   const [showLogLatest, setShowLogLatest] = useState(false);
   const [wikiOpen, setWikiOpen] = useState(false);
   const [wikiActive, setWikiActive] = useState(false);
+  const [dataEditorOpen, setDataEditorOpen] = useState(false);
+  const [dataEditorActive, setDataEditorActive] = useState(false);
+  const [dataEditorSource, setDataEditorSource] = useState("");
   const logRef = useRef<HTMLPreElement | null>(null);
   const followLogRef = useRef(true);
   const selectionClearedRef = useRef(false);
@@ -271,6 +353,10 @@ export function App() {
   );
   const sessionMenuSession = sessions.find(
     (session) => session.id === sessionMenu?.id,
+  );
+  const hardwarePreset = useMemo(
+    () => selectHardwarePreset(hardware, form.engine, form.tier),
+    [hardware, form.engine, form.tier],
   );
 
   const refreshSessions = useCallback(async () => {
@@ -327,6 +413,7 @@ export function App() {
       refreshBackend(),
       window.osai.backendInstallStatus().then(setBackendInstall),
       window.osai.appUpdateStatus().then(setUpdate),
+      window.osai.hardwareInfo().then(setHardware),
     ]).catch((error) => setNotice(readableError(error)));
     const removeUpdateListener = window.osai.onAppUpdateStatus(setUpdate);
     const removeBackendInstallListener = window.osai.onBackendInstallStatus(
@@ -346,6 +433,11 @@ export function App() {
       removeBackendInstallListener();
     };
   }, [refreshBackend, refreshSessions]);
+
+  useEffect(() => {
+    if (!form.autoSettings) return;
+    setForm((current) => applyHardwarePreset(current, hardwarePreset));
+  }, [hardwarePreset, selectedId]);
 
   useEffect(() => setNoticeExpanded(false), [notice]);
 
@@ -481,6 +573,32 @@ export function App() {
     if (value) setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const openDataEditor = (source = "") => {
+    setDataEditorSource(source || form.fineTuneData || form.alignmentData);
+    setDataEditorOpen(true);
+    setDataEditorActive(true);
+    setWikiActive(false);
+    setSessionMenu(null);
+  };
+
+  const useEditedDataset = (
+    destination: "fineTuneData" | "alignmentData",
+    source: string,
+    recommendedTokenLimit: number,
+  ) => {
+    setForm((current) => ({
+      ...current,
+      [destination]: source,
+      maxSeqLength: current.autoSettings
+        ? Math.max(
+            64,
+            Math.min(hardwarePreset.maxSeqLength, recommendedTokenLimit),
+          )
+        : current.maxSeqLength,
+    }));
+    setDataEditorActive(false);
+  };
+
   const chooseAdapter = async () => {
     const value = await window.osai.chooseFile("Choose an osAi adapter");
     if (value) setForm((current) => ({ ...current, adapter: value }));
@@ -496,8 +614,41 @@ export function App() {
         throw new Error(
           "Install osAi CLI or select its executable in Settings before training.",
         );
+      const dataSources = [
+        ...(form.stage !== "alignment" ? [form.fineTuneData] : []),
+        ...(form.stage !== "fine-tuning"
+          ? [
+              form.stage === "fine-tune-align" && sameDataset
+                ? form.fineTuneData
+                : form.alignmentData,
+            ]
+          : []),
+      ].filter(
+        (value, index, values) => value && values.indexOf(value) === index,
+      );
+      const inspections = [];
+      for (const source of dataSources) {
+        const inspection = await window.osai.inspectDataset(source);
+        if (inspection.invalidRows > 0) {
+          openDataEditor(source);
+          throw new Error(
+            `${inspection.invalidRows} of ${inspection.totalRows} dataset rows need review. The Data Editor has been opened with the first issues and inferred field mappings.`,
+          );
+        }
+        inspections.push(inspection);
+      }
+      const recommendedTokenLimit = Math.max(
+        64,
+        ...inspections.map((inspection) => inspection.recommendedTokenLimit),
+      );
       const request = {
         ...form,
+        maxSeqLength: form.autoSettings
+          ? Math.max(
+              64,
+              Math.min(hardwarePreset.maxSeqLength, recommendedTokenLimit),
+            )
+          : form.maxSeqLength,
         sessionsRoot: form.sessionsRoot || preferences.sessionsRoot,
         reuseDataset: form.stage === "fine-tune-align" && sameDataset,
         alignmentData:
@@ -1028,6 +1179,18 @@ export function App() {
                     onBrowse={() => void chooseAdapter()}
                   />
                 )}
+                <button
+                  type="button"
+                  className="quiet-button data-editor-launch"
+                  onClick={() =>
+                    openDataEditor(
+                      needsFineTune ? form.fineTuneData : form.alignmentData,
+                    )
+                  }
+                >
+                  <Icon name="edit-3" />
+                  Inspect or repair training data
+                </button>
               </section>
 
               {needsAlignment && (
@@ -1090,13 +1253,20 @@ export function App() {
                     <input
                       type="checkbox"
                       checked={form.autoSettings}
-                      onChange={(event) =>
-                        setForm({ ...form, autoSettings: event.target.checked })
-                      }
+                      onChange={(event) => {
+                        const enabled = event.target.checked;
+                        setForm((current) =>
+                          enabled
+                            ? applyHardwarePreset(current, hardwarePreset)
+                            : { ...current, autoSettings: false },
+                        );
+                      }}
                     />
                     <span>
                       <b>Fit settings to this hardware</b>
-                      <small>Fit memory-sensitive values automatically.</small>
+                      <small>
+                        Apply recommended values. Turn off to fine-tune them.
+                      </small>
                     </span>
                   </label>
                   <button
@@ -1113,15 +1283,29 @@ export function App() {
 
               {advanced && (
                 <div className="advanced-panel">
-                  {form.autoSettings && (
+                  <div className="advanced-toolbar">
                     <div className="advanced-auto-note">
                       <Icon name="cpu" />
                       <span>
-                        Hardware fitting controls batch, context, LoRA size and
-                        GGUF runtime values. Turn it off to edit those fields.
+                        {form.autoSettings
+                          ? `${phaseLabel(hardwarePreset.profile)} profile selected. The recommended values are visible below; turn fitting off to edit them.`
+                          : "Custom settings are active. Reset restores the recommended hardware profile."}
                       </span>
                     </div>
-                  )}
+                    <button
+                      type="button"
+                      className="quiet-button compact-button advanced-reset"
+                      onClick={() =>
+                        setForm((current) =>
+                          resetAdvancedValues(current, hardwarePreset),
+                        )
+                      }
+                      title="Restore recommended advanced settings"
+                    >
+                      <Icon name="rotate-ccw" />
+                      Reset
+                    </button>
+                  </div>
 
                   <section className="advanced-group">
                     <div className="advanced-heading">
@@ -1183,7 +1367,7 @@ export function App() {
                         value={form.batchSize}
                         min={1}
                         disabled={form.autoSettings}
-                        placeholder={form.autoSettings ? "Hardware auto" : "1"}
+                        placeholder="1"
                         onChange={(batchSize) =>
                           setForm({ ...form, batchSize })
                         }
@@ -1198,11 +1382,12 @@ export function App() {
                         }
                       />
                       <NumberField
-                        label="Max sequence length"
+                        label="Training token limit"
                         value={form.maxSeqLength}
                         min={32}
                         disabled={form.autoSettings}
-                        placeholder={form.autoSettings ? "Hardware auto" : "64"}
+                        placeholder="64"
+                        hint="Maximum prompt + answer tokens per training example."
                         onChange={(maxSeqLength) =>
                           setForm({ ...form, maxSeqLength })
                         }
@@ -1253,9 +1438,7 @@ export function App() {
                           value={form.rank}
                           min={1}
                           disabled={form.autoSettings}
-                          placeholder={
-                            form.autoSettings ? "Hardware auto" : "2"
-                          }
+                          placeholder="2"
                           onChange={(rank) => setForm({ ...form, rank })}
                         />
                         <NumberField
@@ -1271,9 +1454,7 @@ export function App() {
                           value={form.numLayers}
                           min={1}
                           disabled={form.autoSettings}
-                          placeholder={
-                            form.autoSettings ? "Hardware auto" : "1"
-                          }
+                          placeholder="1"
                           onChange={(numLayers) =>
                             setForm({ ...form, numLayers })
                           }
@@ -1575,7 +1756,7 @@ export function App() {
                         value={form.ggufBatchSize}
                         min={1}
                         disabled={form.autoSettings}
-                        placeholder={form.autoSettings ? "Hardware auto" : "8"}
+                        placeholder="8"
                         onChange={(ggufBatchSize) =>
                           setForm({ ...form, ggufBatchSize })
                         }
@@ -1585,7 +1766,7 @@ export function App() {
                         value={form.ggufThreads}
                         min={1}
                         disabled={form.autoSettings}
-                        placeholder={form.autoSettings ? "Hardware auto" : "2"}
+                        placeholder="2"
                         onChange={(ggufThreads) =>
                           setForm({ ...form, ggufThreads })
                         }
@@ -1722,31 +1903,47 @@ export function App() {
                 <Icon name="activity" />
                 <span>Training sessions</span>
               </div>
-              <button
-                type="button"
-                className={
-                  "quiet-button compact-button wiki-open-button " +
-                  (wikiActive ? "active" : "")
-                }
-                onClick={() => {
-                  setWikiOpen(true);
-                  setWikiActive(true);
-                  setSessionMenu(null);
-                }}
-              >
-                <Icon name="book-open" />
-                Wiki
-              </button>
+              <div className="session-toolbar-actions">
+                <button
+                  type="button"
+                  className={
+                    "quiet-button compact-button wiki-open-button " +
+                    (dataEditorActive ? "active" : "")
+                  }
+                  onClick={() => openDataEditor()}
+                >
+                  <Icon name="edit-3" />
+                  Data editor
+                </button>
+                <button
+                  type="button"
+                  className={
+                    "quiet-button compact-button wiki-open-button " +
+                    (wikiActive ? "active" : "")
+                  }
+                  onClick={() => {
+                    setWikiOpen(true);
+                    setWikiActive(true);
+                    setDataEditorActive(false);
+                    setSessionMenu(null);
+                  }}
+                >
+                  <Icon name="book-open" />
+                  Wiki
+                </button>
+              </div>
             </header>
 
-            {(sessions.length > 0 || wikiOpen) && (
+            {(sessions.length > 0 || wikiOpen || dataEditorOpen) && (
               <div className="session-tabs" role="tablist">
                 {sessions.map((session) => (
                   <div
                     key={session.id}
                     className={
                       "session-tab " +
-                      (!wikiActive && selected?.id === session.id
+                      (!wikiActive &&
+                      !dataEditorActive &&
+                      selected?.id === session.id
                         ? "active "
                         : "") +
                       session.status
@@ -1756,9 +1953,14 @@ export function App() {
                       type="button"
                       className="session-tab-select"
                       role="tab"
-                      aria-selected={!wikiActive && selected?.id === session.id}
+                      aria-selected={
+                        !wikiActive &&
+                        !dataEditorActive &&
+                        selected?.id === session.id
+                      }
                       onClick={() => {
                         setWikiActive(false);
+                        setDataEditorActive(false);
                         selectionClearedRef.current = false;
                         setSelectedId(session.id);
                         setSessionMenu(null);
@@ -1783,6 +1985,44 @@ export function App() {
                     </button>
                   </div>
                 ))}
+                {dataEditorOpen && (
+                  <div
+                    className={
+                      "session-tab wiki-session-tab " +
+                      (dataEditorActive ? "active" : "")
+                    }
+                  >
+                    <button
+                      type="button"
+                      className="session-tab-select"
+                      role="tab"
+                      aria-selected={dataEditorActive}
+                      onClick={() => {
+                        setDataEditorActive(true);
+                        setWikiActive(false);
+                        setSessionMenu(null);
+                      }}
+                    >
+                      <Icon name="edit-3" />
+                      <span>
+                        <b>Data editor</b>
+                        <small>Inspect and repair</small>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="session-tab-more wiki-tab-close"
+                      aria-label="Close Data editor"
+                      title="Close Data editor"
+                      onClick={() => {
+                        setDataEditorOpen(false);
+                        setDataEditorActive(false);
+                      }}
+                    >
+                      <Icon name="x" size={15} />
+                    </button>
+                  </div>
+                )}
                 {wikiOpen && (
                   <div
                     className={
@@ -1797,6 +2037,7 @@ export function App() {
                       aria-selected={wikiActive}
                       onClick={() => {
                         setWikiActive(true);
+                        setDataEditorActive(false);
                         setSessionMenu(null);
                       }}
                     >
@@ -1887,7 +2128,18 @@ export function App() {
                 document.querySelector(".app") || document.body,
               )}
 
-            {wikiActive ? (
+            {dataEditorActive ? (
+              <DataEditor
+                initialSource={dataEditorSource}
+                onUseForFineTune={(source, tokenLimit) =>
+                  useEditedDataset("fineTuneData", source, tokenLimit)
+                }
+                onUseForAlignment={(source, tokenLimit) =>
+                  useEditedDataset("alignmentData", source, tokenLimit)
+                }
+                onError={setNotice}
+              />
+            ) : wikiActive ? (
               <TrainingWiki />
             ) : selected ? (
               <div className="session-detail">
