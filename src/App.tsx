@@ -224,7 +224,7 @@ const fallbackPreferences: Preferences = {
 const fallbackUpdate: AppUpdateStatus = {
   state: "disabled",
   message: "Automatic updates are off",
-  currentVersion: "0.1.19",
+  currentVersion: "0.1.20",
 };
 
 const fallbackBackendInstall: BackendInstallStatus = {

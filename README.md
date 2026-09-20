@@ -71,6 +71,8 @@ The packaged backend is native to the installer’s operating system and archite
 
 While a run is active, **Start training** becomes **Pause training** and **Stop training**. A paused run can be resumed from the same controls. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. Individual split shards, MLX files, and V2 GGUF projectors are downloaded from the selected V1/V2 catalog and checked against its published SHA-256 list. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
 
+On the first launch after upgrading, complete V1 downloads in `~/osAi/models/MLX` or `~/osAi/models/GGUF` are made available under `~/osAi/models/V1` using same-volume hard links. This does not download or store another copy of the model, and the original paths remain valid for older sessions. The app never overwrites an existing V1 folder, leaves incomplete downloads untouched, and waits until active training has stopped before doing this. A legacy model remains usable if promotion is unavailable on its filesystem.
+
 Choose a single `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `train.jsonl` with optional `valid.jsonl` and `test.jsonl` splits. JSON arrays and objects containing `train`, `data`, `records`, `examples`, or `items` arrays are unpacked automatically.
 
 | Dataset layout                  | Accepted fields                                                                                |

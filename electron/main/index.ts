@@ -17,6 +17,7 @@ import { readPreferences, writePreferences } from "./preferences.js";
 import { SessionService } from "./session-service.js";
 import { inspectDataset, saveDataset } from "./dataset-editor.js";
 import { AppUpdateService } from "./updater.js";
+import { migrateLegacyV1Models } from "./model-migration.js";
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
@@ -148,6 +149,22 @@ async function preferences() {
   return readPreferences(userDataPath("preferences.json"));
 }
 
+async function migrateModelsIfIdle() {
+  try {
+    const active = (await sessionService.list()).some((state) =>
+      ["queued", "running", "paused", "stopping"].includes(state.status),
+    );
+    await migrateLegacyV1Models(
+      path.join(os.homedir(), "osAi", "models"),
+      active,
+    );
+  } catch (error) {
+    // The CLI can still use the old V1 layout. A migration problem must not
+    // prevent opening the app or starting a session.
+    console.warn("Could not migrate older V1 models:", error);
+  }
+}
+
 function registerIpc() {
   ipcMain.handle("system:hardware", () => ({
     platform: process.platform,
@@ -242,9 +259,10 @@ function registerIpc() {
   });
   ipcMain.handle("backend-install:status", () => backendInstaller.getStatus());
   ipcMain.handle("backend-install:start", () => backendInstaller.install());
-  ipcMain.handle("training:start", (_event, value: unknown) =>
-    sessionService.start(value as TrainingRequest),
-  );
+  ipcMain.handle("training:start", async (_event, value: unknown) => {
+    await migrateModelsIfIdle();
+    return sessionService.start(value as TrainingRequest);
+  });
   ipcMain.handle("training:pause", (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.pause(id);
@@ -261,6 +279,7 @@ function registerIpc() {
     "training:restart",
     async (_event, id: unknown, value: unknown) => {
       if (typeof id !== "string") throw new Error("Invalid training session");
+      await migrateModelsIfIdle();
       return sessionService.restart(id, value as TrainingRequest, (directory) =>
         shell.trashItem(directory),
       );
@@ -309,6 +328,7 @@ app.whenReady().then(async () => {
     path.join(app.getAppPath(), "dist-electron", "main", "training-worker.js"),
     preferences,
   );
+  await migrateModelsIfIdle();
   backendInstaller = new BackendInstaller(
     userDataPath("backend", "installations"),
     app.isPackaged
