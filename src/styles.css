@@ -493,6 +493,14 @@ p {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.model-tiers.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.model-versions {
+  margin: 12px 0 8px;
+}
+
 .segmented button,
 .model-tiers button,
 .theme-choice button {

@@ -142,6 +142,7 @@ function readableError(error: unknown) {
 const defaults: TrainingRequest = {
   sessionsRoot: "",
   modelSource: "official",
+  modelVersion: "v2",
   tier: "small",
   customModelFolder: "",
   engine: "auto",
@@ -223,7 +224,7 @@ const fallbackPreferences: Preferences = {
 const fallbackUpdate: AppUpdateStatus = {
   state: "disabled",
   message: "Automatic updates are off",
-  currentVersion: "0.1.18",
+  currentVersion: "0.1.19",
 };
 
 const fallbackBackendInstall: BackendInstallStatus = {
@@ -355,8 +356,9 @@ export function App() {
     (session) => session.id === sessionMenu?.id,
   );
   const hardwarePreset = useMemo(
-    () => selectHardwarePreset(hardware, form.engine, form.tier),
-    [hardware, form.engine, form.tier],
+    () =>
+      selectHardwarePreset(hardware, form.engine, form.tier, form.modelVersion),
+    [hardware, form.engine, form.tier, form.modelVersion],
   );
 
   const refreshSessions = useCallback(async () => {
@@ -482,6 +484,7 @@ export function App() {
     setForm({
       ...defaults,
       ...restored,
+      modelVersion: restored.modelVersion ?? "v1",
       targetModules: Array.isArray(selected.request.targetModules)
         ? selected.request.targetModules
         : [],
@@ -768,6 +771,7 @@ export function App() {
     const request: TrainingRequest = {
       ...defaults,
       ...restartCandidate.request,
+      modelVersion: restartCandidate.request.modelVersion ?? "v1",
       targetModules: Array.isArray(restartCandidate.request.targetModules)
         ? restartCandidate.request.targetModules
         : [],
@@ -1002,18 +1006,58 @@ export function App() {
                 </div>
 
                 {form.modelSource === "official" ? (
-                  <div className="model-tiers">
-                    {(["small", "medium", "large"] as const).map((tier) => (
-                      <button
-                        type="button"
-                        key={tier}
-                        className={form.tier === tier ? "active" : ""}
-                        onClick={() => setForm({ ...form, tier })}
-                      >
-                        {tier.charAt(0).toUpperCase() + tier.slice(1)}
-                      </button>
-                    ))}
-                  </div>
+                  <>
+                    <div
+                      className="segmented two model-versions"
+                      aria-label="osCode model generation"
+                    >
+                      {(["v2", "v1"] as const).map((modelVersion) => (
+                        <button
+                          type="button"
+                          key={modelVersion}
+                          className={
+                            form.modelVersion === modelVersion ? "active" : ""
+                          }
+                          onClick={() =>
+                            setForm({
+                              ...form,
+                              modelVersion,
+                              tier:
+                                modelVersion === "v1" && form.tier === "xsmall"
+                                  ? "small"
+                                  : form.tier,
+                            })
+                          }
+                        >
+                          osCode {modelVersion.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                    <div
+                      className={`model-tiers${form.modelVersion === "v2" ? " four" : ""}`}
+                    >
+                      {(form.modelVersion === "v2"
+                        ? ["xsmall", "small", "medium", "large"]
+                        : ["small", "medium", "large"]
+                      ).map((tier) => (
+                        <button
+                          type="button"
+                          key={tier}
+                          className={form.tier === tier ? "active" : ""}
+                          onClick={() =>
+                            setForm({
+                              ...form,
+                              tier: tier as TrainingRequest["tier"],
+                            })
+                          }
+                        >
+                          {tier === "xsmall"
+                            ? "xSmall"
+                            : tier.charAt(0).toUpperCase() + tier.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 ) : (
                   <PathField
                     label="Model folder"

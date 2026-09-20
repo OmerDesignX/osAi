@@ -22,15 +22,33 @@ const allTargets: LoraTargetModule[] = [
 ];
 
 const modelBytes = {
-  "llama.cpp": {
-    small: 2_708_804_288,
-    medium: 3_464_055_456,
-    large: 4_482_403_136,
+  v1: {
+    "llama.cpp": {
+      xsmall: 0,
+      small: 2_708_804_288,
+      medium: 3_464_055_456,
+      large: 4_482_403_136,
+    },
+    mlx: {
+      xsmall: 0,
+      small: 2_912_931_406,
+      medium: 3_701_329_697,
+      large: 4_489_728_089,
+    },
   },
-  mlx: {
-    small: 2_912_931_406,
-    medium: 3_701_329_697,
-    large: 4_489_728_089,
+  v2: {
+    "llama.cpp": {
+      xsmall: 1_453_069_472,
+      small: 2_967_466_240,
+      medium: 3_748_063_456,
+      large: 4_846_152_064,
+    },
+    mlx: {
+      xsmall: 1_248_475_840,
+      small: 3_144_821_433,
+      medium: 3_995_397_150,
+      large: 4_845_972_858,
+    },
   },
 } as const;
 
@@ -49,6 +67,7 @@ export function selectHardwarePreset(
   hardware: HardwareInfo,
   engine: TrainingRequest["engine"],
   tier: TrainingRequest["tier"],
+  modelVersion: TrainingRequest["modelVersion"] = "v2",
 ): HardwarePreset {
   // Match the CLI's cross-platform automatic engine choice. An Apple-silicon
   // build previews MLX; other automatic builds preview llama.cpp.
@@ -61,7 +80,7 @@ export function selectHardwarePreset(
       : "llama.cpp";
   const total = Math.max(hardware.physicalMemoryBytes, 1);
   const budget = total * 0.75;
-  const size = modelBytes[runtime][tier];
+  const size = modelBytes[modelVersion][runtime][tier];
   const headroom = budget - size;
   const profile =
     total <= 10 * GIB || headroom < 4 * GIB

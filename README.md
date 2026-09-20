@@ -20,7 +20,7 @@
 
 Training, inference, rollout generation, alignment, logs, adapters, and final models remain local after any selected model download completes. There is no telemetry.
 
-osCode Models are supported by default, and custom models can be added. See [osCode Models](https://github.com/OmerDesignX/osCode-Models).
+osCode Models V1 and V2 are supported by default, and custom models can be added. See [osCode Models](https://models.omerdesign.com/oscode-models/).
 
 Supported training modes:
 
@@ -60,7 +60,7 @@ The packaged backend is native to the installer’s operating system and archite
 ## Start a training session
 
 1. Under **Model**, press **osCode model** or **Custom model**.
-2. For an osCode model, press **Small**, **Medium**, or **Large**. For a custom model, press the folder button and select its model folder.
+2. For an osCode model, select **V2** (default) or **V1**, then choose its size. V2 also includes **xSmall**. For a custom model, press the folder button and select its model folder.
 3. Leave **Engine**, **Accelerator**, and **Multi-GPU** on **Auto** for hardware-aware selection, or choose them manually.
 4. Under **Pipeline**, press **Fine-tune**, **Align**, or **Fine-tune + align**.
 5. Press the dataset browse button and select a `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `train.jsonl`.
@@ -69,7 +69,7 @@ The packaged backend is native to the installer’s operating system and archite
 8. Choose **Save sessions in** when a different location is needed. The default is `~/osAi/sessions` in the user's home folder.
 9. Press **Start training**.
 
-While a run is active, **Start training** becomes **Pause training** and **Stop training**. A paused run can be resumed from the same controls. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
+While a run is active, **Start training** becomes **Pause training** and **Stop training**. A paused run can be resumed from the same controls. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. Individual split shards, MLX files, and V2 GGUF projectors are downloaded from the selected V1/V2 catalog and checked against its published SHA-256 list. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
 
 Choose a single `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `train.jsonl` with optional `valid.jsonl` and `test.jsonl` splits. JSON arrays and objects containing `train`, `data`, `records`, `examples`, or `items` arrays are unpacked automatically.
 
@@ -251,7 +251,8 @@ For GGUF, the bundle keeps the original file or split shards and any multimodal 
 | **Sessions**                              | Open the local sessions directory                                           |
 | **Settings**                              | Configure appearance, backend connection, and App updates                   |
 | **osCode model / Custom model**           | Choose the model source                                                     |
-| **Small / Medium / Large**                | Choose an official osCode model tier                                        |
+| **V1 / V2**                               | Choose the osCode model generation; V2 is the default                       |
+| **xSmall / Small / Medium / Large**       | Choose an official tier; xSmall is available in V2                          |
 | **Engine**                                | Select Auto, MLX, or llama.cpp                                              |
 | **Accelerator**                           | Select GPU-first Auto, Metal, MPS, CUDA, Vulkan, or CPU                     |
 | **Multi-GPU**                             | Automatically use devices, require multiple GPUs, or use one device         |

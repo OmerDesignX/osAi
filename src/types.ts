@@ -33,7 +33,8 @@ export type Preferences = {
 export type TrainingRequest = {
   sessionsRoot: string;
   modelSource: "official" | "custom";
-  tier: "small" | "medium" | "large";
+  modelVersion: "v1" | "v2";
+  tier: "xsmall" | "small" | "medium" | "large";
   customModelFolder: string;
   engine: "auto" | "mlx" | "llama.cpp";
   accelerator: "auto" | "metal" | "mps" | "cuda" | "vulkan" | "cpu";

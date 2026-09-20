@@ -425,9 +425,22 @@ export async function buildOsAiArgs(
 
   const args = ["train"];
   if (input.modelSource === "official") {
-    if (!["small", "medium", "large"].includes(input.tier))
+    const modelVersion = input.modelVersion ?? "v1";
+    if (!["v1", "v2"].includes(modelVersion))
+      throw new Error("Invalid osCode model version");
+    if (
+      !["xsmall", "small", "medium", "large"].includes(input.tier) ||
+      (modelVersion === "v1" && input.tier === "xsmall")
+    )
       throw new Error("Invalid official model tier");
-    args.push("--tier", input.tier, "--bundled-root", modelsRoot);
+    args.push(
+      "--tier",
+      input.tier,
+      "--model-version",
+      modelVersion,
+      "--bundled-root",
+      modelsRoot,
+    );
   } else if (input.modelSource === "custom") {
     const folder = await assertDirectory(
       input.customModelFolder,
@@ -769,6 +782,8 @@ export function restoreLegacyRequest(
   return {
     sessionsRoot: path.dirname(state.sessionDirectory),
     modelSource: custom ? "custom" : "official",
+    modelVersion: (argumentValue(args, "--model-version") ||
+      "v1") as TrainingRequest["modelVersion"],
     tier: (argumentValue(args, "--tier") || "small") as TrainingRequest["tier"],
     customModelFolder:
       custom && customRoot ? path.join(customRoot, custom) : "",

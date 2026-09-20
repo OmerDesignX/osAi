@@ -539,6 +539,42 @@ test("builds a non-interactive combined osAi command with local rollouts", async
   }
 });
 
+test("passes V2 xSmall to the CLI and rejects xSmall for V1", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-v2-model-"));
+  const fine = path.join(root, "fine");
+  await fs.mkdir(fine);
+  try {
+    const { args } = await buildOsAiArgs(
+      {
+        ...base,
+        modelVersion: "v2",
+        tier: "xsmall",
+        stage: "fine-tuning",
+        fineTuneData: fine,
+      },
+      path.join(root, "sessions"),
+      path.join(root, "models"),
+    );
+    assert.equal(args[args.indexOf("--model-version") + 1], "v2");
+    assert.equal(args[args.indexOf("--tier") + 1], "xsmall");
+    await assert.rejects(
+      buildOsAiArgs(
+        {
+          ...base,
+          modelVersion: "v1",
+          tier: "xsmall",
+          stage: "fine-tuning",
+          fineTuneData: fine,
+        },
+        path.join(root, "sessions"),
+      ),
+      /Invalid official model tier/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("passes organized manual training, rollout, and runtime controls", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-advanced-"));
   const fine = path.join(root, "fine");
