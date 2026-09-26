@@ -12,6 +12,5 @@ fi
 node "$ROOT/releaseScripts/common/sync-version.mjs"
 node "$ROOT/releaseScripts/common/cleanup-release.mjs"
 cd "$ROOT"
-pnpm install --frozen-lockfile
-pnpm run release:build:macos
-
+node "$ROOT/releaseScripts/common/run-pnpm.mjs" install --frozen-lockfile
+node "$ROOT/releaseScripts/common/run-pnpm.mjs" run release:build:macos

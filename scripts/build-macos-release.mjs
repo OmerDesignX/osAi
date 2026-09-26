@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { runPnpm } from "../releaseScripts/common/run-pnpm.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -48,12 +49,13 @@ async function removeGeneratedRelease(target) {
   await fs.rm(target, { recursive: true, force: true });
 }
 
-await run("pnpm", ["run", "release:check-disk"]);
+await runPnpm(["run", "release:check-disk"], { cwd: root });
 await run("bash", ["releaseScripts/macos/prepare-icon.sh"]);
-await run("pnpm", ["run", "format:check"]);
-await run("pnpm", ["test"]);
-await run("pnpm", ["exec", "vite", "build"], {
-  NODE_OPTIONS: "--max-old-space-size=4096",
+await runPnpm(["run", "format:check"], { cwd: root });
+await runPnpm(["test"], { cwd: root });
+await runPnpm(["exec", "vite", "build"], {
+  cwd: root,
+  env: { NODE_OPTIONS: "--max-old-space-size=4096" },
 });
 
 for (const architecture of ["arm64", "x64"]) {
@@ -65,8 +67,7 @@ for (const architecture of ["arm64", "x64"]) {
   const packageDirectory = path.join(root, "release", "macos-" + architecture);
   await removeGeneratedRelease(packageDirectory);
 
-  await run(
-    "pnpm",
+  await runPnpm(
     [
       "exec",
       "electron-builder",
@@ -77,7 +78,7 @@ for (const architecture of ["arm64", "x64"]) {
       "--publish",
       "never",
     ],
-    { CSC_IDENTITY_AUTO_DISCOVERY: "false" },
+    { cwd: root, env: { CSC_IDENTITY_AUTO_DISCOVERY: "false" } },
   );
 
   await run(process.execPath, [
@@ -88,7 +89,7 @@ for (const architecture of ["arm64", "x64"]) {
   ]);
 }
 
-await run("pnpm", ["run", "release:stage:macos"]);
+await runPnpm(["run", "release:stage:macos"], { cwd: root });
 await run(process.execPath, ["scripts/prepare-python-runtime.mjs", "clean"]);
 await removeGeneratedRelease(path.join(root, "release"));
 

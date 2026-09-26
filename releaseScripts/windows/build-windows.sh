@@ -58,22 +58,17 @@ if ! OSAI_NODE_BIN="$(resolve_node)"; then
   echo "Node.js 22 or newer was not found. Install Node.js, then reopen Git Bash." >&2
   exit 1
 fi
-if ! OSAI_PNPM_BIN="$(resolve_pnpm)"; then
-  echo "pnpm 11 was not found. Install it, then reopen Git Bash." >&2
-  exit 1
-fi
 
-export OSAI_NODE_BIN OSAI_PNPM_BIN
+export OSAI_NODE_BIN
+OSAI_PNPM_BIN="$(resolve_pnpm || true)"
+export OSAI_PNPM_BIN
 node() { "$OSAI_NODE_BIN" "$@"; }
-pnpm() { "$OSAI_PNPM_BIN" "$@"; }
-export -f node pnpm
-export PATH="$(dirname "$OSAI_NODE_BIN"):$(dirname "$OSAI_PNPM_BIN"):$PATH"
+export -f node
+export PATH="$(dirname "$OSAI_NODE_BIN"):$PATH"
 export Path="$PATH"
 export CI=true
 export PNPM_DISABLE_SELF_UPDATE_CHECK=true
 export NO_UPDATE_NOTIFIER=true
-export npm_config_user_agent="pnpm/$(pnpm --version) node/$(node --version)"
-export npm_execpath="$OSAI_PNPM_BIN"
 
 NODE_MAJOR="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
 if [[ ! "$NODE_MAJOR" =~ ^[0-9]+$ ]] || (( NODE_MAJOR < 22 )); then
@@ -81,7 +76,8 @@ if [[ ! "$NODE_MAJOR" =~ ^[0-9]+$ ]] || (( NODE_MAJOR < 22 )); then
   exit 1
 fi
 
-echo "Using $(node --version) and pnpm $(pnpm --version)"
+echo "Using $(node --version)"
+node "$ROOT/releaseScripts/common/run-pnpm.mjs" --version
 node "$ROOT/releaseScripts/common/cleanup-release.mjs"
 bash "$ROOT/releaseScripts/common/prepare-source.sh"
 cd "$ROOT"
@@ -89,6 +85,6 @@ node scripts/prepare-python-runtime.mjs windows x64
 export CSC_IDENTITY_AUTO_DISCOVERY=false
 node "$ROOT/node_modules/electron-builder/cli.js" --win nsis --x64 --publish never
 node scripts/verify-package.mjs windows x64 "$ROOT/release"
-pnpm run release:stage:windows
+node releaseScripts/common/run-pnpm.mjs run release:stage:windows
 node scripts/prepare-python-runtime.mjs clean
 node releaseScripts/common/cleanup-release.mjs
