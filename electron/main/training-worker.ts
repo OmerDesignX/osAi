@@ -55,6 +55,70 @@ function clamp(value: number) {
 function consumeLine(raw: string) {
   const line = cleanTerminalLine(raw);
   if (!line) return;
+  if (/^osai: auto settings\b/i.test(line)) {
+    const fields = Object.fromEntries(
+      [...line.matchAll(/\b([a-z_]+)=([^\s]+)/gi)].map((match) => [
+        match[1],
+        match[2],
+      ]),
+    );
+    state.autoSettingsSummary = [
+      fields.profile && `Profile ${fields.profile}`,
+      fields.context && `Context ${fields.context}`,
+      fields.batch && `Batch ${fields.batch}`,
+      fields.layers && `Layers ${fields.layers}`,
+      fields.rank && `Rank ${fields.rank}`,
+      fields.gguf_batch && `GGUF microbatch ${fields.gguf_batch}`,
+      fields.threads && `Threads ${fields.threads}`,
+      fields.budget && `Memory budget ${fields.budget}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    state.message = "Auto settings selected for this hardware";
+    void scheduleStateWrite();
+    return;
+  }
+  if (/^osai: training plan\b/i.test(line)) {
+    fineTuneProgress.consume(line);
+    const windows = /\bwindows=(\d+)/.exec(line)?.[1];
+    state.phase = "fine-tuning";
+    state.indeterminate = true;
+    state.message = windows
+      ? `Preparing ${Number(windows).toLocaleString()} training windows`
+      : "Preparing training windows and optimizer steps";
+    void scheduleStateWrite();
+    return;
+  }
+  const retry =
+    /^osai: auto retry\s+.*?\bengine=([^\s]+).*?\battempt=(\d+).*?\bcontext=(\d+)->(\d+).*?\bbatch=(\d+)->(\d+)/i.exec(
+      line,
+    );
+  if (retry) {
+    const [, engine, attempt, previous, next, oldBatch, newBatch] = retry;
+    state.phase = "fine-tuning";
+    state.indeterminate = true;
+    state.adjustment = `Attempt ${attempt} · ${engine} · context ${previous} → ${next} · batch ${oldBatch} → ${newBatch}`;
+    if (state.autoSettingsSummary) {
+      state.autoSettingsSummary = state.autoSettingsSummary
+        .replace(/Context \d+/, `Context ${next}`)
+        .replace(/Batch \d+/, `Batch ${newBatch}`);
+    }
+    state.message = "Memory limit reached; preparing a smaller training window";
+    fineTuneProgress = new FineTuneProgressParser(job.iterations);
+    void scheduleStateWrite();
+    return;
+  }
+  const attempt =
+    /^osai: training attempt\s+.*?\bengine=([^\s]+).*?\battempt=(\d+).*?\bcontext=(\d+).*?\bbatch=(\d+)/i.exec(
+      line,
+    );
+  if (attempt) {
+    state.phase = "fine-tuning";
+    state.indeterminate = true;
+    state.message = `Preparing ${attempt[1]} training attempt ${attempt[2]} with ${attempt[3]} token windows`;
+    void scheduleStateWrite();
+    return;
+  }
   const lower = line.toLowerCase();
   const percent = /(?:^|\s)(\d{1,3})%(?:\s|$)/.exec(line);
   const byteProgress =

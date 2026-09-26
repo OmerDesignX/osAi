@@ -2354,6 +2354,34 @@ select:disabled {
   margin: 18px 0 14px;
 }
 
+.session-status-details {
+  margin: 0 0 16px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.session-status-details > div {
+  display: grid;
+  grid-template-columns: minmax(100px, 132px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.session-status-details > div + div {
+  border-top: 1px solid var(--border);
+}
+
+.session-status-details span {
+  color: var(--muted);
+}
+.session-status-details strong {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
 .inline-progress > span,
 .status-track > span {
   display: block;

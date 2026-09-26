@@ -158,6 +158,8 @@ export type SessionState = {
   progress: number;
   indeterminate: boolean;
   message: string;
+  autoSettingsSummary?: string;
+  adjustment?: string;
   createdAt: string;
   startedAt?: string;
   endedAt?: string;

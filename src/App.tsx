@@ -2337,7 +2337,7 @@ export function App() {
                   <div>
                     <h2>{selected.name}</h2>
                     <p>
-                      {selected.message} · {phaseLabel(selected.phase)} ·{" "}
+                      {phaseLabel(selected.phase)} ·{" "}
                       {friendlyTime(selected.startedAt || selected.createdAt)}
                     </p>
                   </div>
@@ -2345,8 +2345,32 @@ export function App() {
                 </header>
                 <div className="inline-progress">
                   <span
+                    className={
+                      selected.indeterminate ? "indeterminate" : undefined
+                    }
                     style={{ width: Math.max(2, selected.progress) + "%" }}
                   />
+                </div>
+                <div
+                  className="session-status-details"
+                  aria-label="Training status"
+                >
+                  <div>
+                    <span>Current step</span>
+                    <strong>{selected.message}</strong>
+                  </div>
+                  {selected.autoSettingsSummary && (
+                    <div>
+                      <span>Auto settings</span>
+                      <strong>{selected.autoSettingsSummary}</strong>
+                    </div>
+                  )}
+                  {selected.adjustment && (
+                    <div>
+                      <span>Memory adjustment</span>
+                      <strong>{selected.adjustment}</strong>
+                    </div>
+                  )}
                 </div>
                 {selected.error && (
                   <div className="session-error">

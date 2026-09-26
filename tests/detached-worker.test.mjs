@@ -130,6 +130,61 @@ test("MLX table iterations advance against the announced optimizer steps", async
   }
 });
 
+test("auto settings and memory retry remain visible in session status", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-auto-"));
+  const worker = path.resolve("dist-electron/main/training-worker.js");
+  const backend = path.resolve("tests/fixtures/fake-backend.mjs");
+  const statePath = path.join(root, "state.json");
+  const logPath = path.join(root, "training.log");
+  const jobPath = path.join(root, "job.json");
+  const now = new Date().toISOString();
+  const state = {
+    schemaVersion: 1,
+    id: "66666666-6666-4666-8666-666666666666",
+    name: "auto-retry",
+    status: "queued",
+    phase: "preparing",
+    progress: 0,
+    indeterminate: true,
+    message: "queued",
+    createdAt: now,
+    sessionDirectory: root,
+    logPath,
+    command: "node fake-backend.mjs --auto-retry",
+  };
+  const job = {
+    schemaVersion: 1,
+    id: state.id,
+    executable: process.execPath,
+    args: [backend, "--auto-retry"],
+    sessionDirectory: root,
+    statePath,
+    logPath,
+    stopPath: path.join(root, "stop.request"),
+    stage: "fine-tuning",
+    iterations: 1,
+    alignmentIterations: 1,
+    createdAt: now,
+  };
+  await fs.writeFile(statePath, JSON.stringify(state));
+  await fs.writeFile(jobPath, JSON.stringify(job));
+  const processHandle = spawn(process.execPath, [worker, jobPath], {
+    stdio: "ignore",
+  });
+  try {
+    const active = await waitFor(statePath, (value) =>
+      Boolean(value.adjustment),
+    );
+    assert.match(active.autoSettingsSummary, /Context 512/);
+    assert.match(active.adjustment, /Attempt 2.*1024 → 512/);
+    assert.equal(active.indeterminate, true);
+    await waitFor(statePath, (value) => value.status === "completed");
+  } finally {
+    processHandle.kill("SIGKILL");
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a failed worker surfaces the backend error instead of only its exit code", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-fail-"));
   const worker = path.resolve("dist-electron/main/training-worker.js");

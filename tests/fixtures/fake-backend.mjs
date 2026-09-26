@@ -4,7 +4,21 @@ if (process.argv.includes("--fail")) {
   process.exit(2);
 }
 
-if (process.argv.includes("--mlx-progress")) {
+if (process.argv.includes("--auto-retry")) {
+  process.stdout.write(
+    "osai: auto settings profile=maximum budget=10GiB context=1024 batch=4 layers=2 rank=8 threads=8\n",
+  );
+  process.stdout.write(
+    "osai: training plan examples=2 windows=4 epochs=1 batch=4 steps=1 optimizer_updates=1\n",
+  );
+  process.stdout.write(
+    "osai: auto retry engine=mlx attempt=2 context=1024->512 batch=4->4 reason=oom\n",
+  );
+  process.stdout.write(
+    "osai: training attempt engine=mlx attempt=2 context=512 batch=4 windows=overlap\n",
+  );
+  setTimeout(() => process.exit(0), 600);
+} else if (process.argv.includes("--mlx-progress")) {
   process.stdout.write(
     "osai: training plan examples=15011 epochs=1 batch=1 steps=15011 optimizer_updates=15011\n",
   );
