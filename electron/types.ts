@@ -93,6 +93,29 @@ export type TrainingRequest = {
   devices: string;
 };
 
+export type AutoBenchmarkResult = {
+  settings: {
+    profile: "compact" | "balanced" | "performance" | "maximum";
+    batch_size: number;
+    max_seq_length: number;
+    num_layers: number;
+    rank: number;
+    gguf_batch_size: number;
+    gguf_threads: number;
+    target_modules: LoraTargetModule[];
+  };
+  engine: Engine;
+  accelerator: Accelerator;
+  devices: string[];
+  elapsed_seconds: number;
+  cached: boolean;
+};
+
+export type SessionArtifacts = {
+  mergedModel: string | null;
+  adapterDirectory: string | null;
+};
+
 export type WorkerJob = {
   schemaVersion: 1;
   id: string;
@@ -289,6 +312,10 @@ export type OsAiBridge = {
   backendStatus(): Promise<BackendStatus>;
   backendInstallStatus(): Promise<BackendInstallStatus>;
   installBackend(): Promise<BackendInstallStatus>;
+  autoBenchmark(value: TrainingRequest): Promise<AutoBenchmarkResult>;
+  autoDevices(
+    accelerator: Accelerator,
+  ): Promise<{ accelerator: string; devices: string[] }>;
   startTraining(value: TrainingRequest): Promise<SessionState>;
   pauseTraining(id: string): Promise<SessionState>;
   resumeTraining(id: string): Promise<SessionState>;
@@ -297,6 +324,8 @@ export type OsAiBridge = {
   deleteSession(id: string): Promise<void>;
   listSessions(): Promise<SessionState[]>;
   sessionLog(id: string): Promise<string>;
+  sessionArtifacts(id: string): Promise<SessionArtifacts>;
+  openSessionArtifacts(id: string): Promise<void>;
   revealSession(id: string): Promise<void>;
   openSessionsFolder(): Promise<void>;
   appUpdateStatus(): Promise<AppUpdateStatus>;

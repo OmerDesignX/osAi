@@ -211,6 +211,21 @@ p {
   color: var(--danger);
 }
 
+.top-status.benchmark-status {
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.top-status.benchmark-status .icon {
+  color: var(--accent);
+}
+
+.top-status.benchmark-status > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .top-status .notice-message {
   min-width: 0;
   height: 100%;
@@ -2393,6 +2408,39 @@ select:disabled {
 .session-error > button:focus-visible {
   outline: 0;
   background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.session-artifacts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--control-fill);
+  font-size: 12px;
+}
+
+.session-artifacts > span {
+  flex: 1 1 220px;
+  color: var(--text);
+}
+
+.session-artifacts > button {
+  padding: 6px 12px;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  font-size: 12px;
+}
+
+.session-artifacts > button:hover,
+.session-artifacts > button:focus-visible {
+  outline: 0;
+  background: var(--control-selected);
 }
 
 .log-heading {

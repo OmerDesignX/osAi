@@ -26,6 +26,10 @@ const bridge: OsAiBridge = {
   backendStatus: () => ipcRenderer.invoke("backend:status"),
   backendInstallStatus: () => ipcRenderer.invoke("backend-install:status"),
   installBackend: () => ipcRenderer.invoke("backend-install:start"),
+  autoBenchmark: (value: TrainingRequest) =>
+    ipcRenderer.invoke("training:auto-benchmark", value),
+  autoDevices: (accelerator: TrainingRequest["accelerator"]) =>
+    ipcRenderer.invoke("training:auto-devices", accelerator),
   startTraining: (value: TrainingRequest) =>
     ipcRenderer.invoke("training:start", value),
   pauseTraining: (id: string) => ipcRenderer.invoke("training:pause", id),
@@ -36,6 +40,10 @@ const bridge: OsAiBridge = {
   deleteSession: (id: string) => ipcRenderer.invoke("training:delete", id),
   listSessions: () => ipcRenderer.invoke("training:list"),
   sessionLog: (id: string) => ipcRenderer.invoke("training:log", id),
+  sessionArtifacts: (id: string) =>
+    ipcRenderer.invoke("training:artifacts", id),
+  openSessionArtifacts: (id: string) =>
+    ipcRenderer.invoke("training:open-artifacts", id),
   revealSession: (id: string) => ipcRenderer.invoke("training:reveal", id),
   openSessionsFolder: () => ipcRenderer.invoke("training:open-root"),
   appUpdateStatus: () => ipcRenderer.invoke("updates:status"),

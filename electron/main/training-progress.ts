@@ -38,12 +38,23 @@ export function phaseProgress(
 export class FineTuneProgressParser {
   private plannedSteps = 0;
   private mlxTable = false;
+  private parallelDevices: string[] = [];
+  private parallelProgress = new Map<string, FineTuneProgress>();
 
   constructor(private readonly fallbackTotal = 1) {}
 
   consume(raw: string): FineTuneProgress | null {
     const line = cleanTerminalLine(raw);
     if (!line) return null;
+
+    const workers = /^osai:\s*data-parallel LoRA training on (.+)$/i.exec(line);
+    if (workers) {
+      this.parallelDevices = workers[1]
+        .split(",")
+        .map((device) => device.trim());
+      this.parallelProgress.clear();
+      return null;
+    }
 
     const plan = /\bosai:\s*training plan\b.*?\bsteps\s*=\s*([\d,]+)/i.exec(
       line,
@@ -65,8 +76,29 @@ export class FineTuneProgressParser {
         line,
       );
     const trainProgress = line.toLowerCase().includes("train")
-      ? /\b([\d,]+)\s*\/\s*([\d,]+)\b/.exec(line)
+      ? /\bdata\s*=\s*([\d,]+)\s*\/\s*([\d,]+)\b/i.exec(line) ||
+        /\b([\d,]+)\s*\/\s*([\d,]+)\b/.exec(line)
       : null;
+    const device = /^\[([A-Za-z]+\d+)\]\s/.exec(line)?.[1];
+    if (device && this.parallelDevices.includes(device)) {
+      if (!trainProgress) return null;
+      const completed = count(trainProgress[1]);
+      const total = count(trainProgress[2]);
+      if (!validProgress(completed, total)) return null;
+      this.parallelProgress.set(device, { completed, total });
+      return {
+        completed: this.parallelDevices.reduce(
+          (sum, worker) =>
+            sum + (this.parallelProgress.get(worker)?.completed ?? 0),
+          0,
+        ),
+        total: this.parallelDevices.reduce(
+          (sum, worker) =>
+            sum + (this.parallelProgress.get(worker)?.total ?? total),
+          0,
+        ),
+      };
+    }
     const mlxRow = this.mlxTable
       ? /^(\d[\d,]*)\s+(?:nan|inf|-?(?:\d+(?:\.\d+)?|\.\d+))\b/i.exec(line)
       : null;

@@ -31,7 +31,7 @@ test("notifications reveal complete cleaned error details", async () => {
   assert.match(app, /<pre>\{notice\}<\/pre>/);
 });
 
-test("backend detection is bounded, honest, and never silently installs", async () => {
+test("backend detection is bounded and first-run setup starts once", async () => {
   const [app, service, main] = await Promise.all([
     fs.readFile("src/App.tsx", "utf8"),
     fs.readFile("electron/main/session-service.ts", "utf8"),
@@ -40,6 +40,7 @@ test("backend detection is bounded, honest, and never silently installs", async 
   assert.match(service, /BACKEND_STATUS_TIMEOUT_MS\s*=\s*5_000/);
   assert.match(service, /The selected executable is not the osAi CLI/);
   assert.match(app, /backendCheckRef/);
+  assert.match(app, /autoInstallStartedRef/);
   assert.match(app, /Not connected/);
   assert.doesNotMatch(app, /setInterval\(\(\) => void refreshBackend/);
   const statusHandler = main.slice(

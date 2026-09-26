@@ -1,6 +1,6 @@
 {
   "name": "osai-app",
-  "version": "0.1.20",
+  "version": "0.1.22",
   "description": "A local desktop training controller for osAi",
   "main": "dist-electron/main/index.js",
   "author": "osAi contributors",
@@ -22,7 +22,7 @@
     "release:stage:windows": "node scripts/stage-windows-release.mjs",
     "release:stage:linux": "node scripts/stage-linux-release.mjs",
     "typecheck": "tsc -b --pretty false",
-    "test": "tsc -b --pretty false && node --test tests/*.test.mjs",
+    "test": "tsc -b --pretty false && node --test --test-concurrency=1 tests/*.test.mjs",
     "format": "prettier --write . --ignore-unknown",
     "format:check": "prettier --check . --ignore-unknown --end-of-line auto",
     "preview": "vite preview"
@@ -72,11 +72,8 @@
         ]
       },
       {
-        "from": "build/backend-bundle",
-        "to": "backend",
-        "filter": [
-          "**/*"
-        ]
+        "from": "releaseScripts/backend-source.json",
+        "to": "backend-source.json"
       }
     ],
     "mac": {

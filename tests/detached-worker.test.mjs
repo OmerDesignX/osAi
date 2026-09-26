@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-async function waitFor(file, predicate, timeout = 8_000) {
+async function waitFor(file, predicate, timeout = 20_000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
     try {

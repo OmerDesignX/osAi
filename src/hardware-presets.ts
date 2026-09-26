@@ -114,6 +114,8 @@ export function selectHardwarePreset(
       maximum: [256, 4, 8, 16, balancedTargets],
     } as const;
     [maxSeqLength, numLayers, rank, ggufBatchSize, targets] = gguf[profile];
+    numLayers = 1;
+    targets = compactTargets;
   }
 
   return {

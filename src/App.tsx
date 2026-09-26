@@ -9,6 +9,7 @@ import type {
   HardwareInfo,
   LoraTargetModule,
   Preferences,
+  SessionArtifacts,
   SessionState,
   Theme,
   TrainingRequest,
@@ -316,6 +317,15 @@ export function App() {
   const [hardware, setHardware] = useState(fallbackHardware);
   const [update, setUpdate] = useState(fallbackUpdate);
   const [notice, setNotice] = useState("");
+  const [benchmarkBusy, setBenchmarkBusy] = useState(false);
+  const [benchmarkPreset, setBenchmarkPreset] = useState<HardwarePreset | null>(
+    null,
+  );
+  const [benchmarkDevices, setBenchmarkDevices] = useState<string[]>([]);
+  const [benchmarkMessage, setBenchmarkMessage] = useState("");
+  const [deviceSignature, setDeviceSignature] = useState<string | null>(null);
+  const [sessionArtifacts, setSessionArtifacts] =
+    useState<SessionArtifacts | null>(null);
   const [noticeExpanded, setNoticeExpanded] = useState(false);
   const [sessionMenu, setSessionMenu] = useState<{
     id: string;
@@ -344,6 +354,7 @@ export function App() {
   const followLogRef = useRef(true);
   const selectionClearedRef = useRef(false);
   const backendCheckRef = useRef<Promise<BackendStatus> | null>(null);
+  const autoInstallStartedRef = useRef(false);
 
   const selected = useMemo(
     () => sessions.find((session) => session.id === selectedId) || null,
@@ -355,11 +366,12 @@ export function App() {
   const sessionMenuSession = sessions.find(
     (session) => session.id === sessionMenu?.id,
   );
-  const hardwarePreset = useMemo(
+  const fallbackPreset = useMemo(
     () =>
       selectHardwarePreset(hardware, form.engine, form.tier, form.modelVersion),
     [hardware, form.engine, form.tier, form.modelVersion],
   );
+  const hardwarePreset = benchmarkPreset || fallbackPreset;
 
   const refreshSessions = useCallback(async () => {
     const next = await window.osai.listSessions();
@@ -441,7 +453,106 @@ export function App() {
     setForm((current) => applyHardwarePreset(current, hardwarePreset));
   }, [hardwarePreset, selectedId]);
 
+  useEffect(() => {
+    if (!form.autoSettings || !backend?.available) {
+      setDeviceSignature(null);
+      return;
+    }
+    let current = true;
+    const discover = () => {
+      void window.osai
+        .autoDevices(form.accelerator)
+        .then((inventory) => {
+          if (current) setDeviceSignature(JSON.stringify(inventory));
+        })
+        .catch((error) => {
+          if (current) setNotice(readableError(error));
+        });
+    };
+    setDeviceSignature(null);
+    discover();
+    const interval = window.setInterval(discover, 15_000);
+    return () => {
+      current = false;
+      window.clearInterval(interval);
+    };
+  }, [backend?.available, form.autoSettings, form.accelerator]);
+
+  useEffect(() => {
+    if (!form.autoSettings || !backend?.available || deviceSignature === null) {
+      setBenchmarkBusy(false);
+      return;
+    }
+    if (form.modelSource === "custom" && !form.customModelFolder) return;
+    let current = true;
+    setBenchmarkPreset(null);
+    setBenchmarkBusy(true);
+    setBenchmarkMessage("");
+    const timer = window.setTimeout(() => {
+      void window.osai
+        .autoBenchmark(form)
+        .then((result) => {
+          if (!current) return;
+          const settings = result.settings;
+          setBenchmarkPreset({
+            profile: settings.profile,
+            batchSize: settings.batch_size,
+            maxSeqLength: settings.max_seq_length,
+            numLayers: settings.num_layers,
+            rank: settings.rank,
+            ggufBatchSize: settings.gguf_batch_size,
+            ggufThreads: settings.gguf_threads,
+            targetModules: settings.target_modules,
+          });
+          setBenchmarkDevices(result.devices);
+          setBenchmarkMessage(
+            `Auto settings updated for ${result.devices.length ? result.devices.join(", ") : "CPU"}.`,
+          );
+          void window.osai.hardwareInfo().then(setHardware);
+        })
+        .catch((error) => {
+          if (current) setNotice(readableError(error));
+        })
+        .finally(() => {
+          if (current) setBenchmarkBusy(false);
+        });
+    }, 350);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [
+    backend?.available,
+    form.autoSettings,
+    form.modelSource,
+    form.modelVersion,
+    form.tier,
+    form.customModelFolder,
+    form.engine,
+    form.accelerator,
+    form.multiGpu,
+    form.devices,
+    form.splitMode,
+    form.tensorSplit,
+    form.mainGpu,
+    deviceSignature,
+  ]);
+
   useEffect(() => setNoticeExpanded(false), [notice]);
+
+  useEffect(() => {
+    if (!selected || selected.status !== "completed") {
+      setSessionArtifacts(null);
+      return;
+    }
+    let current = true;
+    void window.osai.sessionArtifacts(selected.id).then((result) => {
+      if (current) setSessionArtifacts(result);
+    });
+    return () => {
+      current = false;
+    };
+  }, [selected?.id, selected?.status]);
 
   useEffect(() => {
     if (!sessionMenu) return;
@@ -587,17 +698,12 @@ export function App() {
   const useEditedDataset = (
     destination: "fineTuneData" | "alignmentData",
     source: string,
-    recommendedTokenLimit: number,
+    _recommendedTokenLimit: number,
   ) => {
     setForm((current) => ({
       ...current,
       [destination]: source,
-      maxSeqLength: current.autoSettings
-        ? Math.max(
-            64,
-            Math.min(hardwarePreset.maxSeqLength, recommendedTokenLimit),
-          )
-        : current.maxSeqLength,
+      maxSeqLength: current.maxSeqLength,
     }));
     setDataEditorActive(false);
   };
@@ -629,7 +735,6 @@ export function App() {
       ].filter(
         (value, index, values) => value && values.indexOf(value) === index,
       );
-      const inspections = [];
       for (const source of dataSources) {
         const inspection = await window.osai.inspectDataset(source);
         if (inspection.invalidRows > 0) {
@@ -638,20 +743,9 @@ export function App() {
             `${inspection.invalidRows} of ${inspection.totalRows} dataset rows need review. The Data Editor has been opened with the first issues and inferred field mappings.`,
           );
         }
-        inspections.push(inspection);
       }
-      const recommendedTokenLimit = Math.max(
-        64,
-        ...inspections.map((inspection) => inspection.recommendedTokenLimit),
-      );
       const request = {
         ...form,
-        maxSeqLength: form.autoSettings
-          ? Math.max(
-              64,
-              Math.min(hardwarePreset.maxSeqLength, recommendedTokenLimit),
-            )
-          : form.maxSeqLength,
         sessionsRoot: form.sessionsRoot || preferences.sessionsRoot,
         reuseDataset: form.stage === "fine-tune-align" && sameDataset,
         alignmentData:
@@ -825,6 +919,18 @@ export function App() {
     }
   };
 
+  useEffect(() => {
+    if (
+      backend?.available === false &&
+      !backendChecking &&
+      backendInstall.state === "idle" &&
+      !autoInstallStartedRef.current
+    ) {
+      autoInstallStartedRef.current = true;
+      void downloadBackend();
+    }
+  }, [backend, backendChecking, backendInstall.state]);
+
   const updateBusy = ["checking", "downloading", "installing"].includes(
     update.state,
   );
@@ -892,9 +998,32 @@ export function App() {
         </div>
 
         <div
-          className={"global-activity " + (notice ? "has-status" : "")}
+          className={
+            "global-activity " +
+            (notice || benchmarkBusy || benchmarkMessage ? "has-status" : "")
+          }
           aria-live="polite"
         >
+          {(benchmarkBusy || benchmarkMessage) && !notice && (
+            <div className="top-status benchmark-status" role="status">
+              <Icon name="activity" />
+              <span>
+                {benchmarkBusy
+                  ? "Benchmarking this model and hardware for Auto settings…"
+                  : benchmarkMessage}
+              </span>
+              {!benchmarkBusy && (
+                <button
+                  type="button"
+                  className="notice-dismiss"
+                  onClick={() => setBenchmarkMessage("")}
+                  aria-label="Dismiss benchmark notification"
+                >
+                  <Icon name="x" />
+                </button>
+              )}
+            </div>
+          )}
           {notice && (
             <div className="top-status notification" role="status">
               <Icon name="alert-circle" />
@@ -1057,6 +1186,17 @@ export function App() {
                         </button>
                       ))}
                     </div>
+                    {(form.engine === "llama.cpp" ||
+                      (form.engine === "auto" &&
+                        !(
+                          hardware.platform === "darwin" &&
+                          hardware.architecture === "arm64"
+                        ))) && (
+                      <small>
+                        GGUF osCode training adapts the final MLP block. Earlier
+                        recurrent blocks have no llama.cpp backward pass.
+                      </small>
+                    )}
                   </>
                 ) : (
                   <PathField
@@ -1332,7 +1472,9 @@ export function App() {
                       <Icon name="cpu" />
                       <span>
                         {form.autoSettings
-                          ? `${phaseLabel(hardwarePreset.profile)} profile selected. The recommended values are visible below; turn fitting off to edit them.`
+                          ? benchmarkBusy
+                            ? "Running local inference to fit training settings to this hardware…"
+                            : `${phaseLabel(hardwarePreset.profile)} profile selected${benchmarkDevices.length ? ` on ${benchmarkDevices.join(", ")}` : ""}. The recommended values are visible below; turn fitting off to edit them.`
                           : "Custom settings are active. Reset restores the recommended hardware profile."}
                       </span>
                     </div>
@@ -1931,11 +2073,15 @@ export function App() {
               ) : (
                 <button
                   className="primary-button start-button"
-                  disabled={starting}
+                  disabled={starting || (form.autoSettings && benchmarkBusy)}
                   onClick={() => void startTraining()}
                 >
-                  <Icon name={starting ? "loader" : "play"} />
-                  {starting ? "Starting…" : "Start training"}
+                  <Icon name={starting || benchmarkBusy ? "loader" : "play"} />
+                  {starting
+                    ? "Starting…"
+                    : benchmarkBusy
+                      ? "Benchmarking…"
+                      : "Start training"}
                 </button>
               )}
             </footer>
@@ -2218,6 +2364,42 @@ export function App() {
                     )}
                   </div>
                 )}
+                {selected.status === "completed" && sessionArtifacts && (
+                  <div className="session-artifacts">
+                    <span>
+                      {sessionArtifacts.adapterDirectory
+                        ? "LoRA adapter saved"
+                        : "No adapter was published"}
+                      {sessionArtifacts.mergedModel
+                        ? " · Reusable merged model saved"
+                        : ""}
+                    </span>
+                    {sessionArtifacts.mergedModel && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((current) => ({
+                            ...current,
+                            modelSource: "custom",
+                            customModelFolder: sessionArtifacts.mergedModel!,
+                          }))
+                        }
+                      >
+                        Use merged model
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void window.osai
+                          .openSessionArtifacts(selected.id)
+                          .catch((error) => setNotice(readableError(error)))
+                      }
+                    >
+                      Open outputs
+                    </button>
+                  </div>
+                )}
                 <div className="log-heading">
                   <span>Live output</span>
                 </div>
@@ -2265,8 +2447,9 @@ export function App() {
             <img src={osAiIcon} alt="" aria-hidden="true" />
             <h1>Set up osAi</h1>
             <p>
-              Install the complete osAi CLI repository and its Python packages
-              for this computer.
+              Download osAi CLI, install its Python packages, and compile
+              llama.cpp for this computer. Setup uses the available GPU
+              toolchain when possible.
             </p>
             <button
               className="primary-button onboarding-download"

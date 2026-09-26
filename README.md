@@ -51,11 +51,11 @@ Every completed run publishes both `base-plus-adapter` and a standalone lossless
 ## Install
 
 1. Download the installer for your computer from the [osAi releases](https://github.com/OmerDesignX/osAi-CLI/releases), then open osAi App.
-2. On first launch, press **Install osAi**. The App uses its bundled CPython 3.12 runtime, complete osAi CLI source, offline Python packages, and prebuilt llama.cpp engines to create a private local environment.
-3. The training workspace opens automatically when setup finishes. Python, CMake, compilers, and command-line build tools are not required.
+2. On first launch, setup starts automatically. The App downloads the osAi CLI source, installs its Python packages using the included CPython 3.12 runtime, and compiles llama.cpp on this computer. Internet access is required for this first setup. The setup screen offers a retry button if a download or build fails.
+3. The training workspace opens when setup and the native build finish. The setup screen shows download and compiler progress. Windows setup detects Microsoft C++ Build Tools or downloads a verified portable C++ toolchain. macOS and Linux need their native C/C++ tools for local compilation.
 4. If an existing installation is not found automatically, open **Settings**, select its executable under **osAi backend**, then press **Save and check**.
 
-The packaged backend is native to the installer’s operating system and architecture. Runtime hardware detection selects GPU acceleration first and falls back to CPU when an automatically selected backend is unavailable.
+The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SDKs are present on Windows or Linux, and CPU when a GPU build cannot be completed. Windows setup can download a verified Vulkan SDK into its private build cache if the runtime is present but the SDK is missing. Apple silicon with macOS 14 or newer can also use MLX.
 
 ## Start a training session
 
@@ -101,8 +101,8 @@ to prompts, answers, conversations, preferences, rewards, or raw text. You can
 repair previewed JSON rows, create validation and test splits, and save a clean
 canonical copy without changing the source data. Selecting **Use for
 fine-tuning** or **Use for alignment** returns that copy to the training form;
-hardware fitting treats the recommended token length as a request and keeps its
-RAM-safe limit as the upper bound.
+hardware fitting uses the model and available hardware; the dataset's row count
+and token-limit recommendation do not change the Auto training profile.
 
 Choose a complete VLM under **Custom model** for media training. For a GGUF VLM,
 the same custom model folder must also contain its matching quantized MLX VLM;
@@ -185,7 +185,7 @@ No rollout, critic, reward-model, telemetry, or internet server is started. PPO 
 
 ## Automatic hardware settings and multi-GPU
 
-**Fit settings to this hardware** is enabled by default. It reserves memory for the operating system and runtime, checks that the selected base model fits, and chooses the largest conservative training profile that is safe for the available RAM.
+**Fit settings to this hardware** is enabled by default. After CLI setup, osAi runs a local one-turn inference benchmark with the selected model and each selected GPU. It tries the largest profile allowed by host and reported GPU memory, keeping room for backward graphs and the operating system. Changing the model, accelerator, GPU settings, or attached devices reruns the benchmark and shows a notification. The dataset size does not affect the selected profile.
 
 Use **Advanced** to set:
 
@@ -206,7 +206,7 @@ The **Multi-GPU** selector provides:
 | **Require** | Requires more than one compatible GPU and stops if unavailable |
 | **Off**     | Uses one selected GPU or CPU fallback                          |
 
-llama.cpp distributes work across compatible Metal, CUDA, or Vulkan devices. MLX uses local NCCL data parallelism on multi-GPU Linux CUDA systems. Apple silicon normally exposes one unified Metal GPU; systems exposing multiple Metal devices can use the devices reported by the backend.
+For GGUF training, osAi starts one llama.cpp trainer per compatible GPU, assigns each a distinct round-robin shard of the training records, and publishes the record-weighted mean of their LoRA updates. The combined adapter has rank `selected rank × GPU count`. This is independent data-parallel training with adapter averaging at the end of the run; it does not synchronize gradients after each optimizer step. A required multi-GPU run needs at least one record per GPU. Vulkan and Metal automatic selection prefer discrete cards over recognized integrated adapters. Intel Macs can use a Metal eGPU when llama.cpp reports it; Apple silicon Macs do not support eGPUs. MLX uses local NCCL data parallelism on multi-GPU Linux CUDA systems.
 
 ## Custom models
 
@@ -242,6 +242,8 @@ session/
 
 Combined runs keep the supervised stage below `stages/fine-tuning/` and place the final aligned adapter and deployment bundle in the parent session’s `outputs/` directory.
 
+After a run completes, choose **Use merged model** to select `outputs/merged-model/` as the next custom model, or **Open outputs** to inspect both the LoRA adapter and merged model. Further training resumes the embedded adapter and publishes a new self-contained merged model.
+
 For MLX, the deployment bundle leaves every quantized tensor unchanged and embeds the adapter in `osai_adapter/`. osAi verifies that its next-token logits exactly match the original base-plus-adapter path.
 
 For GGUF, the bundle keeps the original file or split shards and any multimodal projector unchanged under `model/`, stores the exact adapter as `osai_adapter.gguf`, and records them in `osai_fusion.json`. SHA-256 checks verify every copy. No unified, dequantized, or requantized model is created.
@@ -273,13 +275,13 @@ For GGUF, the bundle keeps the original file or split shards and any multimodal 
 
 Press **Settings** to choose **Gunmetal + blue**, **Blue dark**, or **Blue light**; install or select the osAi backend; or manage App updates.
 
-App-update checks are available in **Settings**. Press **Install locally** under **osAi backend** to install or repair the complete CLI without opening a browser. Enable **Install updates automatically** to close osAi and open a verified DMG, EXE, or DEB when an App update is ready.
+App-update checks are available in **Settings**. Press **Install locally** under **osAi backend** to download and reinstall the CLI. Enable **Install updates automatically** to close osAi and open a verified DMG, EXE, or DEB when an App update is ready.
 
-Backend setup is fully contained in the App and does not use the network. Network access is limited to optional App updates and official model downloads; training data and model outputs are never sent to those services.
+Backend setup downloads the CLI source and Python dependencies. App updates and official model downloads also use the network. Training data and model outputs stay local.
 
 ## Build release installers
 
-Maintainers can edit `releaseScripts/VERSION.txt` and run the native build script:
+Maintainers can edit the single root `VERSION.txt` and run the native build script:
 
 ```sh
 # macOS 12 or newer: Apple Silicon and Intel DMGs
@@ -296,4 +298,4 @@ Verified unsigned installers are written to `release-assets/macos`, `release-ass
 
 ## License
 
-osAi is Apache-2.0 licensed. The bundled CPython runtime, osAi backend, vendored projects, and downloaded models retain their own licenses.
+osAi is Apache-2.0 licensed. The included CPython runtime, downloaded osAi CLI, vendored projects, and downloaded models retain their own licenses.

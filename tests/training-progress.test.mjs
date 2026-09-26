@@ -39,3 +39,35 @@ test("recovers the latest MLX iteration from a saved log", () => {
     total: 15011,
   });
 });
+
+test("tracks llama.cpp fine-tuning data progress", () => {
+  const parser = new FineTuneProgressParser(1);
+  assert.deepEqual(
+    parser.consume("train: [#####] data=0000002/0000016 loss=2.7"),
+    { completed: 2, total: 16 },
+  );
+});
+
+test("combines labelled multi-GPU worker progress", () => {
+  const parser = new FineTuneProgressParser(1);
+  assert.equal(
+    parser.consume("osai: data-parallel LoRA training on CUDA0, CUDA1"),
+    null,
+  );
+  assert.deepEqual(parser.consume("[CUDA0] train: data=2/16 loss=2.7"), {
+    completed: 2,
+    total: 32,
+  });
+  assert.deepEqual(parser.consume("[CUDA1] train: data=3/16 loss=2.6"), {
+    completed: 5,
+    total: 32,
+  });
+  assert.deepEqual(parser.consume("[CUDA0] train: data=16/16 loss=2.5"), {
+    completed: 19,
+    total: 32,
+  });
+  assert.deepEqual(parser.consume("[CUDA1] train: data=16/16 loss=2.4"), {
+    completed: 32,
+    total: 32,
+  });
+});

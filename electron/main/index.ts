@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Preferences, TrainingRequest } from "../types.js";
 import { BackendInstaller } from "./backend-installer.js";
+import { readAutoDevices, runAutoBenchmark } from "./auto-benchmark.js";
 import { readPreferences, writePreferences } from "./preferences.js";
 import { SessionService } from "./session-service.js";
 import { inspectDataset, saveDataset } from "./dataset-editor.js";
@@ -259,6 +260,27 @@ function registerIpc() {
   });
   ipcMain.handle("backend-install:status", () => backendInstaller.getStatus());
   ipcMain.handle("backend-install:start", () => backendInstaller.install());
+  ipcMain.handle("training:auto-benchmark", async (_event, value: unknown) => {
+    const status = await sessionService.backendStatus();
+    if (
+      !status.available ||
+      !(await backendInstaller.isCurrent(status.executable))
+    )
+      throw new Error("Install the current osAi CLI before benchmarking");
+    return runAutoBenchmark(status.executable, value as TrainingRequest);
+  });
+  ipcMain.handle("training:auto-devices", async (_event, value: unknown) => {
+    const status = await sessionService.backendStatus();
+    if (
+      !status.available ||
+      !(await backendInstaller.isCurrent(status.executable))
+    )
+      throw new Error("Install the current osAi CLI before detecting GPUs");
+    return readAutoDevices(
+      status.executable,
+      value as TrainingRequest["accelerator"],
+    );
+  });
   ipcMain.handle("training:start", async (_event, value: unknown) => {
     await migrateModelsIfIdle();
     return sessionService.start(value as TrainingRequest);
@@ -293,6 +315,39 @@ function registerIpc() {
   ipcMain.handle("training:log", (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.log(id);
+  });
+  ipcMain.handle("training:artifacts", async (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Invalid training session");
+    const state = await sessionService.find(id);
+    if (state.status !== "completed")
+      return { mergedModel: null, adapterDirectory: null };
+    const outputs = path.join(state.sessionDirectory, "outputs");
+    const mergedModel = path.join(outputs, "merged-model");
+    const ggufManifest = path.join(mergedModel, "gguf", "osai_fusion.json");
+    const mlxManifest = path.join(mergedModel, "mlx", "osai_fusion.json");
+    const adapterDirectory = path.join(
+      outputs,
+      "base-plus-adapter",
+      "adapters",
+    );
+    const [gguf, mlx, adapters] = await Promise.all([
+      fs.stat(ggufManifest).catch(() => null),
+      fs.stat(mlxManifest).catch(() => null),
+      fs.readdir(adapterDirectory).catch(() => []),
+    ]);
+    return {
+      mergedModel: gguf?.isFile() || mlx?.isFile() ? mergedModel : null,
+      adapterDirectory: adapters.length ? adapterDirectory : null,
+    };
+  });
+  ipcMain.handle("training:open-artifacts", async (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Invalid training session");
+    const state = await sessionService.find(id);
+    const outputs = path.join(state.sessionDirectory, "outputs");
+    if (!(await fs.stat(outputs).catch(() => null))?.isDirectory())
+      throw new Error("This session has no published outputs");
+    const error = await shell.openPath(outputs);
+    if (error) throw new Error(error);
   });
   ipcMain.handle("training:reveal", async (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
@@ -335,8 +390,8 @@ app.whenReady().then(async () => {
       ? path.join(process.resourcesPath, "python")
       : path.join(app.getAppPath(), "build", "python-runtime"),
     app.isPackaged
-      ? path.join(process.resourcesPath, "backend")
-      : path.join(app.getAppPath(), "build", "backend-bundle"),
+      ? path.join(process.resourcesPath, "backend-source.json")
+      : path.join(app.getAppPath(), "releaseScripts", "backend-source.json"),
     (status) => send("backend-install:status-changed", status),
     async (executable) => {
       const current = await preferences();

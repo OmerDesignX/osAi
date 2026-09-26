@@ -339,10 +339,10 @@ async function main() {
   await atomicStateWrite();
   const log = createWriteStream(job.logPath, { flags: "a", mode: 0o600 });
   log.write(`[osAi App] ${state.startedAt}\n[osAi App] ${state.command}\n\n`);
-  const bundledBackendSource = installedBackendSource(job.executable);
-  const bundledBackendExists = (
+  const installedSource = installedBackendSource(job.executable);
+  const installedSourceExists = (
     await fs
-      .stat(path.join(bundledBackendSource, "pyproject.toml"))
+      .stat(path.join(installedSource, "pyproject.toml"))
       .catch(() => null)
   )?.isFile();
   child = spawn(job.executable, job.args, {
@@ -355,7 +355,7 @@ async function main() {
       ...process.env,
       PYTHONUNBUFFERED: "1",
       OSAI_APP_SESSION: job.id,
-      ...(bundledBackendExists ? { OSAI_ROOT: bundledBackendSource } : {}),
+      ...(installedSourceExists ? { OSAI_ROOT: installedSource } : {}),
     },
   });
   child.stdout?.pipe(log, { end: false });
