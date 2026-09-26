@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import type { AutoBenchmarkResult, TrainingRequest } from "../types.js";
+import { backendRuntimeEnvironment } from "./backend-source.js";
 
 const outputLimit = 64 * 1024;
 const benchmarkTimeoutMs = 60 * 60 * 1_000;
@@ -64,11 +65,12 @@ export function autoBenchmarkArgs(input: TrainingRequest) {
   return args;
 }
 
-export function runAutoBenchmark(
+export async function runAutoBenchmark(
   executable: string,
   input: TrainingRequest,
 ): Promise<AutoBenchmarkResult> {
   const args = autoBenchmarkArgs(input);
+  const environment = await backendRuntimeEnvironment(executable);
   if (active) active.kill();
   return new Promise((resolve, reject) => {
     let stdout = "";
@@ -78,6 +80,7 @@ export function runAutoBenchmark(
       shell: false,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
+      env: environment,
     });
     active = child;
     const finish = (error?: Error, result?: AutoBenchmarkResult) => {
@@ -124,12 +127,13 @@ export function runAutoBenchmark(
   });
 }
 
-export function readAutoDevices(
+export async function readAutoDevices(
   executable: string,
   accelerator: TrainingRequest["accelerator"],
 ): Promise<{ accelerator: string; devices: string[] }> {
   if (!["auto", "metal", "mps", "cuda", "vulkan", "cpu"].includes(accelerator))
     return Promise.reject(new Error("Invalid accelerator"));
+  const environment = await backendRuntimeEnvironment(executable);
   return new Promise((resolve, reject) => {
     const child = spawn(
       executable,
@@ -138,6 +142,7 @@ export function readAutoDevices(
         shell: false,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
+        env: environment,
       },
     );
     let output = "";

@@ -11,6 +11,10 @@ import {
   bundledPythonExecutable,
   findSourceRoot,
 } from "../dist-electron/main/backend-installer.js";
+import {
+  backendRuntimeEnvironment,
+  managedBackendSource,
+} from "../dist-electron/main/backend-source.js";
 
 const testPython = [process.env.OSAI_TEST_PYTHON, "python3", "python"].find(
   (candidate) =>
@@ -157,6 +161,7 @@ test("managed backends update when the CLI download reference changes", async ()
   const sourceManifest = path.join(root, "backend-source.json");
   const install = path.join(installations, "20260908");
   const executable = backendExecutablePath(path.join(install, ".venv"));
+  const downloadedSource = path.join(install, "source", "osAi-CLI-main");
   const packagedManifest = {
     repository: "https://github.com/OmerDesignX/osAi-CLI",
     archive:
@@ -166,7 +171,30 @@ test("managed backends update when the CLI download reference changes", async ()
   try {
     await fs.mkdir(path.dirname(executable), { recursive: true });
     await fs.writeFile(executable, "");
+    await fs.mkdir(path.join(downloadedSource, "scripts"), { recursive: true });
+    await fs.mkdir(path.join(downloadedSource, "vendor", "llama.cpp"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(downloadedSource, "pyproject.toml"),
+      "[project]\n",
+    );
+    await fs.writeFile(
+      path.join(downloadedSource, "scripts", "setup_osai.py"),
+      "",
+    );
+    await fs.writeFile(
+      path.join(downloadedSource, "vendor", "llama.cpp", "CMakeLists.txt"),
+      "",
+    );
     await fs.writeFile(sourceManifest, JSON.stringify(packagedManifest));
+
+    assert.equal(await managedBackendSource(executable), downloadedSource);
+    assert.equal(
+      (await backendRuntimeEnvironment(executable, { TEST_SETTING: "1" }))
+        .OSAI_ROOT,
+      downloadedSource,
+    );
 
     assert.equal(
       await backendInstallationIsCurrent(
@@ -207,6 +235,15 @@ test("managed backends update when the CLI download reference changes", async ()
         sourceManifest,
       ),
       true,
+    );
+    await fs.rm(downloadedSource, { recursive: true, force: true });
+    assert.equal(
+      await backendInstallationIsCurrent(
+        executable,
+        installations,
+        sourceManifest,
+      ),
+      false,
     );
   } finally {
     await fs.rm(root, { recursive: true, force: true });

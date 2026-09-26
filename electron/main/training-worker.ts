@@ -3,6 +3,7 @@ import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SessionState, WorkerJob } from "../types.js";
+import { backendRuntimeEnvironment } from "./backend-source.js";
 import {
   cleanTerminalLine,
   FineTuneProgressParser,
@@ -11,10 +12,6 @@ import {
 
 const jobPath = process.argv[2];
 if (!jobPath || !path.isAbsolute(jobPath)) process.exit(2);
-
-export function installedBackendSource(executable: string) {
-  return path.resolve(path.dirname(executable), "..", "..", "source");
-}
 
 let state: SessionState;
 let job: WorkerJob;
@@ -339,12 +336,7 @@ async function main() {
   await atomicStateWrite();
   const log = createWriteStream(job.logPath, { flags: "a", mode: 0o600 });
   log.write(`[osAi App] ${state.startedAt}\n[osAi App] ${state.command}\n\n`);
-  const installedSource = installedBackendSource(job.executable);
-  const installedSourceExists = (
-    await fs
-      .stat(path.join(installedSource, "pyproject.toml"))
-      .catch(() => null)
-  )?.isFile();
+  const backendEnvironment = await backendRuntimeEnvironment(job.executable);
   child = spawn(job.executable, job.args, {
     cwd: job.sessionDirectory,
     shell: false,
@@ -352,10 +344,9 @@ async function main() {
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
-      ...process.env,
+      ...backendEnvironment,
       PYTHONUNBUFFERED: "1",
       OSAI_APP_SESSION: job.id,
-      ...(installedSourceExists ? { OSAI_ROOT: installedSource } : {}),
     },
   });
   child.stdout?.pipe(log, { end: false });

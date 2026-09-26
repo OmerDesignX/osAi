@@ -4,7 +4,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { BackendInstallStatus } from "../types.js";
+import { findSourceRoot, managedBackendSource } from "./backend-source.js";
 import { osAiVersionFromOutput } from "./session-service.js";
+
+export { findSourceRoot } from "./backend-source.js";
 
 const PYTHON_CHECK =
   "import sys; print('.'.join(map(str, sys.version_info[:3]))); " +
@@ -140,46 +143,17 @@ export async function backendInstallationIsCurrent(
   );
   if (resolvedExecutable !== expectedExecutable) return false;
 
-  const [expected, installed] = await Promise.all([
+  const [expected, installed, source] = await Promise.all([
     readSourceManifest(sourceManifestPath),
     readSourceManifest(path.join(installRoot, "OSAI_BACKEND_SOURCE.json")),
+    managedBackendSource(executable),
   ]);
   return Boolean(
     expected &&
     installed &&
+    source &&
     expected.archive === installed.archive &&
     expected.ref === installed.ref,
-  );
-}
-
-export async function findSourceRoot(extractedRoot: string) {
-  const candidates = [
-    extractedRoot,
-    ...(await fs
-      .readdir(extractedRoot, { withFileTypes: true })
-      .then((entries) =>
-        entries
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => path.join(extractedRoot, entry.name)),
-      )),
-  ];
-  for (const candidate of candidates) {
-    const required = [
-      path.join(candidate, "pyproject.toml"),
-      path.join(candidate, "scripts", "setup_osai.py"),
-      path.join(candidate, "vendor", "llama.cpp", "CMakeLists.txt"),
-    ];
-    if (
-      (
-        await Promise.all(
-          required.map((file) => fs.stat(file).catch(() => null)),
-        )
-      ).every((details) => details?.isFile())
-    )
-      return candidate;
-  }
-  throw new Error(
-    "The downloaded archive is not a complete osAi CLI repository",
   );
 }
 
