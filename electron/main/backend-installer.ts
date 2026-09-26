@@ -11,7 +11,7 @@ const PYTHON_CHECK =
   "raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)";
 const MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES = 12 * 1024 * 1024 * 1024;
-const EXTRACT_ARCHIVE = `import pathlib, shutil, stat, sys, zipfile
+export const EXTRACT_ARCHIVE = `import pathlib, shutil, stat, sys, zipfile
 archive, destination = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).resolve()
 destination.mkdir(parents=True, exist_ok=True)
 total = 0
@@ -29,6 +29,10 @@ with zipfile.ZipFile(archive) as source:
         total += member.file_size
         if total > ${MAX_EXTRACTED_BYTES}:
             raise ValueError("CLI archive exceeds its extracted size limit")
+        # osAi builds llama.cpp without its server. The server UI contains
+        # paths beyond Windows MAX_PATH and is not used by the CLI trainer.
+        if parts[1:5] == ("vendor", "llama.cpp", "tools", "ui"):
+            continue
         target = destination.joinpath(*parts).resolve()
         if not target.is_relative_to(destination):
             raise ValueError("CLI archive escaped the install directory")
@@ -396,9 +400,14 @@ export class BackendInstaller {
         ["-c", EXTRACT_ARCHIVE, archive, extractedSource],
         { timeoutMs: 15 * 60 * 1000 },
       );
+      log = (log + extraction.stdout + extraction.stderr).slice(-2_000_000);
       if (extraction.code !== 0)
         throw new Error(
-          extraction.stderr.trim() || "Could not extract osAi CLI source",
+          "Could not extract osAi CLI source: " +
+            cleanSetupLine(
+              extraction.stderr.trim().split(/\r?\n/).filter(Boolean).at(-1) ||
+                "Archive verification failed",
+            ),
         );
       await fs.rm(archive);
       const source = await findSourceRoot(extractedSource);

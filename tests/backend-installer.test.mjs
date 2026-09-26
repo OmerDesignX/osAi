@@ -1,14 +1,99 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  EXTRACT_ARCHIVE,
   backendInstallationIsCurrent,
   backendExecutablePath,
   bundledPythonExecutable,
   findSourceRoot,
 } from "../dist-electron/main/backend-installer.js";
+
+const testPython = [process.env.OSAI_TEST_PYTHON, "python3", "python"].find(
+  (candidate) =>
+    candidate &&
+    spawnSync(candidate, ["-c", "import zipfile"], {
+      stdio: "ignore",
+    }).status === 0,
+);
+
+test(
+  "extracts CLI build sources while omitting llama.cpp server UI paths",
+  { skip: !testPython },
+  async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-archive-"));
+    const archive = path.join(root, "source.zip");
+    const destination = path.join(
+      root,
+      "backend",
+      "installations",
+      "20260926201432394",
+      "source",
+    );
+    const createArchive = `import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    archive.writestr("osAi-CLI-main/pyproject.toml", "[project]\\n")
+    archive.writestr("osAi-CLI-main/scripts/setup_osai.py", "")
+    archive.writestr("osAi-CLI-main/vendor/llama.cpp/CMakeLists.txt", "")
+    archive.writestr("osAi-CLI-main/vendor/llama.cpp/gguf-py/gguf/__init__.py", "")
+    archive.writestr("osAi-CLI-main/vendor/llama.cpp/tools/ui/src/lib/components/app/chat/ChatAttachments/ChatAttachmentsPreview/ChatAttachmentsPreviewCurrentItem/ChatAttachmentsPreviewCurrentItemUnavailable.svelte", "unused")`;
+    try {
+      const created = spawnSync(testPython, ["-c", createArchive, archive], {
+        encoding: "utf8",
+      });
+      assert.equal(created.status, 0, created.stderr);
+      const extracted = spawnSync(
+        testPython,
+        ["-c", EXTRACT_ARCHIVE, archive, destination],
+        { encoding: "utf8" },
+      );
+      assert.equal(extracted.status, 0, extracted.stderr);
+      const source = await findSourceRoot(destination);
+      assert.equal(
+        (
+          await fs.stat(
+            path.join(
+              source,
+              "vendor",
+              "llama.cpp",
+              "gguf-py",
+              "gguf",
+              "__init__.py",
+            ),
+          )
+        ).isFile(),
+        true,
+      );
+      if (process.platform === "win32")
+        assert.ok(
+          path.join(
+            source,
+            "vendor",
+            "llama.cpp",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "components",
+            "app",
+            "chat",
+            "ChatAttachments",
+            "ChatAttachmentsPreview",
+            "ChatAttachmentsPreviewCurrentItem",
+            "ChatAttachmentsPreviewCurrentItemUnavailable.svelte",
+          ).length > 260,
+        );
+      await assert.rejects(
+        fs.stat(path.join(source, "vendor", "llama.cpp", "tools", "ui")),
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("uses the native virtual-environment executable layout", () => {
   assert.equal(

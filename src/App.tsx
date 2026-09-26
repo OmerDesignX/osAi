@@ -2473,9 +2473,11 @@ export function App() {
               <span>
                 {backend === null || backendChecking
                   ? "Looking for an existing osAi CLI installation"
-                  : backendInstall.state !== "idle"
-                    ? backendInstall.message
-                    : backend.message}
+                  : backendInstall.state === "error"
+                    ? "Setup failed. Open the notification above for details, then try again."
+                    : backendInstall.state !== "idle"
+                      ? backendInstall.message
+                      : backend.message}
               </span>
             </div>
           </section>
@@ -2506,7 +2508,9 @@ export function App() {
                   ? "Ready"
                   : backend === null || backendChecking
                     ? "Checking osAi CLI"
-                    : backend?.message || backendInstall.message}
+                    : backendInstall.state === "error"
+                      ? "osAi CLI setup failed"
+                      : backend?.message || backendInstall.message}
             </span>
           </div>
           <div className="status-track">
