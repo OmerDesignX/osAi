@@ -9,9 +9,8 @@ cd "$ROOT"
 CI=true \
   PNPM_DISABLE_SELF_UPDATE_CHECK=true \
   NO_UPDATE_NOTIFIER=true \
-  pnpm install --frozen-lockfile --prefer-offline
-pnpm run release:check-disk
-pnpm run format:check
-pnpm test
+  node "$SCRIPT_DIR/run-pnpm.mjs" install --frozen-lockfile --prefer-offline
+node "$SCRIPT_DIR/run-pnpm.mjs" run release:check-disk
+node "$SCRIPT_DIR/run-pnpm.mjs" run format:check
+node "$SCRIPT_DIR/run-pnpm.mjs" test
 NODE_OPTIONS=--max-old-space-size=4096 node "$ROOT/node_modules/vite/bin/vite.js" build
-
