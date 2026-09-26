@@ -506,7 +506,7 @@ export function App() {
           });
           setBenchmarkDevices(result.devices);
           setBenchmarkMessage(
-            `Auto settings updated for ${result.devices.length ? result.devices.join(", ") : "CPU"}.`,
+            `Auto settings: ${settings.max_seq_length}-token context${result.engine === "llama.cpp" ? `, ${settings.gguf_batch_size} GGUF microbatch` : ""} for ${result.devices.length ? result.devices.join(", ") : "CPU"}.`,
           );
           void window.osai.hardwareInfo().then(setHardware);
         })

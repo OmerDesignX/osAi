@@ -802,8 +802,10 @@ const wikiEntries: WikiEntry[] = [
         <div>
           <h3>Context / maximum sequence length</h3>
           <p>
-            Tokens retained from each example. Too small truncates information;
-            larger values increase activation memory sharply.
+            Tokens visible in one training window. GGUF training uses
+            overlapping windows for long records and keeps every assistant
+            label, though earlier text outside a window cannot influence it.
+            Larger windows increase memory use sharply.
           </p>
         </div>
         <div>

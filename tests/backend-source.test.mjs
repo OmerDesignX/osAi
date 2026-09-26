@@ -36,7 +36,11 @@ test("the app packages a CLI download manifest without backend binaries", async 
   const configuration = JSON.parse(
     await fs.readFile(path.join(root, "releaseScripts", "backend-source.json")),
   );
-  assert.equal(configuration.ref, "main");
+  assert.match(configuration.ref, /^[0-9a-f]{40}$/);
+  assert.equal(
+    configuration.archive,
+    `https://codeload.github.com/OmerDesignX/osAi-CLI/zip/${configuration.ref}`,
+  );
   assert.equal(trustedBackendArchiveUrl(configuration.archive), true);
   assert.equal(
     app.build.extraResources.some((entry) => entry.to === "backend"),

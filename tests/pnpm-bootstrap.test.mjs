@@ -45,5 +45,8 @@ test("native release entry points use the shared pnpm bootstrap", async () => {
   for (const relative of files) {
     const source = await fs.readFile(path.join(root, relative), "utf8");
     assert.match(source, /run-pnpm\.mjs/, relative);
+    if (relative === "releaseScripts/windows/build-windows.sh") {
+      assert.match(source, /run-pnpm\.mjs" exec electron-builder --win/);
+    }
   }
 });

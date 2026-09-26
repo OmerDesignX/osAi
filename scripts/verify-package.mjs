@@ -55,11 +55,20 @@ async function verifyBackendSource(resources) {
   const configuration = JSON.parse(
     await fs.readFile(path.join(resources, "backend-source.json"), "utf8"),
   );
+  const expected = JSON.parse(
+    await fs.readFile(
+      path.join(root, "releaseScripts", "backend-source.json"),
+      "utf8",
+    ),
+  );
   if (
     configuration.repository !== "https://github.com/OmerDesignX/osAi-CLI" ||
+    !/^[0-9a-f]{40}$/.test(configuration.ref) ||
     configuration.archive !==
-      "https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/main" ||
-    configuration.ref !== "main"
+      `https://codeload.github.com/OmerDesignX/osAi-CLI/zip/${configuration.ref}` ||
+    configuration.repository !== expected.repository ||
+    configuration.archive !== expected.archive ||
+    configuration.ref !== expected.ref
   )
     throw new Error("The packaged CLI download configuration is invalid");
   if (await fs.stat(path.join(resources, "backend")).catch(() => null))

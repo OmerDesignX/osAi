@@ -83,7 +83,7 @@ bash "$ROOT/releaseScripts/common/prepare-source.sh"
 cd "$ROOT"
 node scripts/prepare-python-runtime.mjs windows x64
 export CSC_IDENTITY_AUTO_DISCOVERY=false
-node "$ROOT/node_modules/electron-builder/cli.js" --win nsis --x64 --publish never
+node "$ROOT/releaseScripts/common/run-pnpm.mjs" exec electron-builder --win nsis --x64 --publish never
 node scripts/verify-package.mjs windows x64 "$ROOT/release"
 node releaseScripts/common/run-pnpm.mjs run release:stage:windows
 node scripts/prepare-python-runtime.mjs clean
