@@ -63,9 +63,9 @@ async function verifyBackendSource(resources) {
   );
   if (
     configuration.repository !== "https://github.com/OmerDesignX/osAi-CLI" ||
-    !/^[0-9a-f]{40}$/.test(configuration.ref) ||
+    configuration.ref !== "main" ||
     configuration.archive !==
-      `https://codeload.github.com/OmerDesignX/osAi-CLI/zip/${configuration.ref}` ||
+      `https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/${configuration.ref}` ||
     configuration.repository !== expected.repository ||
     configuration.archive !== expected.archive ||
     configuration.ref !== expected.ref
