@@ -50,12 +50,12 @@ Every completed run publishes both `base-plus-adapter` and a standalone lossless
 
 ## Install
 
-1. Download the installer for your computer from the [osAi releases](https://github.com/OmerDesignX/osAi-CLI/releases), then open osAi App.
+1. Download the installer for your computer from the [osAi releases](https://github.com/OmerDesignX/osAi/releases), then open osAi App.
 2. On first launch, setup starts automatically. The App downloads the osAi CLI source, installs its Python packages using the included CPython 3.12 runtime, and compiles llama.cpp on this computer. Internet access is required for this first setup. The setup screen offers a retry button if a download or build fails.
-3. The training workspace opens when setup and the native build finish. The setup screen shows download and compiler progress. Windows setup detects Microsoft C++ Build Tools or downloads a verified portable C++ toolchain. macOS and Linux need their native C/C++ tools for local compilation.
+3. The training workspace opens when setup and the native build finish. The setup screen shows download and compiler progress. Each package includes CMake and Ninja for its platform. Windows setup detects Microsoft C++ Build Tools or downloads a verified portable C++ toolchain. macOS and Linux need their native C/C++ tools for local compilation.
 4. If an existing installation is not found automatically, open **Settings**, select its executable under **osAi backend**, then press **Save and check**.
 
-The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SDKs are present on Windows or Linux, and CPU when a GPU build cannot be completed. Windows setup can download a verified Vulkan SDK into its private build cache if the runtime is present but the SDK is missing. Apple silicon with macOS 14 or newer can also use MLX.
+The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SDKs are present on Windows or Linux, and CPU when no GPU toolchain is available. An attempted GPU build that fails is reported during setup. Windows setup can download a verified Vulkan SDK into its private build cache if the runtime is present but the SDK is missing. Apple silicon with macOS 14 or newer can also use MLX.
 
 ## Start a training session
 

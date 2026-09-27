@@ -47,5 +47,27 @@ export async function backendRuntimeEnvironment(
   base: NodeJS.ProcessEnv = process.env,
 ) {
   const source = await managedBackendSource(executable);
-  return source ? { ...base, OSAI_ROOT: source } : { ...base };
+  if (!source) return { ...base };
+  const environment: NodeJS.ProcessEnv = { ...base, OSAI_ROOT: source };
+  const oldPath =
+    Object.entries(environment).find(
+      ([key]) => key.toLowerCase() === "path",
+    )?.[1] || "";
+  for (const key of Object.keys(environment))
+    if (key.toLowerCase() === "path") delete environment[key];
+  const resources = process.resourcesPath;
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const bundledTools = resources
+    ? [
+        path.join(resources, "native-tools", "cmake", "bin"),
+        path.join(resources, "native-tools", "bin"),
+      ]
+    : [];
+  environment.PATH = [path.dirname(executable), ...bundledTools, oldPath]
+    .filter(Boolean)
+    .join(path.delimiter);
+  environment.OSAI_CMAKE = resources
+    ? path.join(resources, "native-tools", "cmake", "bin", `cmake${suffix}`)
+    : path.join(path.dirname(executable), `cmake${suffix}`);
+  return environment;
 }

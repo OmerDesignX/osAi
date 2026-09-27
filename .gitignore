@@ -6,6 +6,7 @@ release/
 release-assets/
 build/python-runtime/
 build/python-runtime-cache/
+build/native-tools/
 build/backend-bundle/
 build/backend-source-cache/
 build/backend-native-cache/

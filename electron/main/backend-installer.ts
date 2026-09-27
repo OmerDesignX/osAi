@@ -387,9 +387,33 @@ export class BackendInstaller {
       const source = await findSourceRoot(extractedSource);
 
       const installLog = path.join(installRoot, "install.log");
-      const setupEnvironment = {
+      const inheritedPath = Object.entries(process.env).find(
+        ([key]) => key.toLowerCase() === "path",
+      )?.[1];
+      const setupEnvironment: NodeJS.ProcessEnv = {
         ...process.env,
         OSAI_ROOT: source,
+        OSAI_CMAKE: path.join(
+          path.dirname(this.pythonRuntimeRoot),
+          "native-tools",
+          "cmake",
+          "bin",
+          process.platform === "win32" ? "cmake.exe" : "cmake",
+        ),
+        PATH: [
+          path.join(
+            path.dirname(this.pythonRuntimeRoot),
+            "native-tools",
+            "cmake",
+            "bin",
+          ),
+          path.join(
+            path.dirname(this.pythonRuntimeRoot),
+            "native-tools",
+            "bin",
+          ),
+          inheritedPath || "",
+        ].join(path.delimiter),
         DO_NOT_TRACK: "1",
         HF_HUB_DISABLE_TELEMETRY: "1",
         PIP_DISABLE_PIP_VERSION_CHECK: "1",
@@ -397,6 +421,11 @@ export class BackendInstaller {
         TOKENIZERS_PARALLELISM: "false",
         WANDB_MODE: "disabled",
       };
+      for (const key of Object.keys(setupEnvironment)) {
+        if (key.toLowerCase() === "path" && key !== "PATH") {
+          delete setupEnvironment[key];
+        }
+      }
       this.update({
         state: "installing",
         message:

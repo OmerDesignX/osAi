@@ -190,11 +190,45 @@ test("managed backends update when the CLI download reference changes", async ()
     await fs.writeFile(sourceManifest, JSON.stringify(packagedManifest));
 
     assert.equal(await managedBackendSource(executable), downloadedSource);
-    assert.equal(
-      (await backendRuntimeEnvironment(executable, { TEST_SETTING: "1" }))
-        .OSAI_ROOT,
-      downloadedSource,
+    const resources = path.join(root, "resources");
+    const originalResources = Object.getOwnPropertyDescriptor(
+      process,
+      "resourcesPath",
     );
+    Object.defineProperty(process, "resourcesPath", {
+      configurable: true,
+      value: resources,
+    });
+    let runtime;
+    try {
+      runtime = await backendRuntimeEnvironment(executable, {
+        TEST_SETTING: "1",
+        PATH: "system-tools",
+      });
+    } finally {
+      if (originalResources)
+        Object.defineProperty(process, "resourcesPath", originalResources);
+      else delete process.resourcesPath;
+    }
+    assert.equal(runtime.OSAI_ROOT, downloadedSource);
+    assert.equal(runtime.TEST_SETTING, "1");
+    assert.equal(
+      runtime.OSAI_CMAKE,
+      path.join(
+        resources,
+        "native-tools",
+        "cmake",
+        "bin",
+        process.platform === "win32" ? "cmake.exe" : "cmake",
+      ),
+    );
+    assert.ok(
+      runtime.PATH.startsWith(path.dirname(executable) + path.delimiter),
+    );
+    assert.ok(
+      runtime.PATH.includes(path.join(resources, "native-tools", "bin")),
+    );
+    assert.ok(runtime.PATH.endsWith("system-tools"));
 
     assert.equal(
       await backendInstallationIsCurrent(

@@ -64,6 +64,11 @@ for (const architecture of ["arm64", "x64"]) {
     "macos",
     architecture,
   ]);
+  await run(process.execPath, [
+    "scripts/prepare-native-tools.mjs",
+    "macos",
+    architecture,
+  ]);
   const packageDirectory = path.join(root, "release", "macos-" + architecture);
   await removeGeneratedRelease(packageDirectory);
 
@@ -91,6 +96,7 @@ for (const architecture of ["arm64", "x64"]) {
 
 await runPnpm(["run", "release:stage:macos"], { cwd: root });
 await run(process.execPath, ["scripts/prepare-python-runtime.mjs", "clean"]);
+await run(process.execPath, ["scripts/prepare-native-tools.mjs", "clean"]);
 await removeGeneratedRelease(path.join(root, "release"));
 
 process.stdout.write(

@@ -75,6 +75,35 @@ async function verifyBackendSource(resources) {
     throw new Error("The package unexpectedly contains a bundled CLI backend");
 }
 
+async function verifyNativeTools(
+  resources,
+  targetPlatform,
+  targetArchitecture,
+) {
+  const tools = path.join(resources, "native-tools");
+  const suffix = targetPlatform === "windows" ? ".exe" : "";
+  const cmake = path.join(tools, "cmake", "bin", `cmake${suffix}`);
+  const ninja = path.join(tools, "bin", `ninja${suffix}`);
+  await requireArtifact(cmake, 100_000);
+  await requireArtifact(ninja, 100_000);
+  const details = JSON.parse(
+    await fs.readFile(path.join(tools, "OSAI_NATIVE_TOOLS.json"), "utf8"),
+  );
+  if (
+    details.platform !== targetPlatform ||
+    details.architecture !== targetArchitecture
+  )
+    throw new Error("The packaged native tools target the wrong platform");
+  if (
+    !(await run(cmake, ["--version"])).includes(
+      `cmake version ${details.cmakeVersion}`,
+    )
+  )
+    throw new Error("The packaged CMake executable did not pass verification");
+  if (!(await run(ninja, ["--version"])).startsWith(details.ninjaVersion))
+    throw new Error("The packaged Ninja executable did not pass verification");
+}
+
 if (platform === "macos") {
   if (process.platform !== "darwin")
     throw new Error("macOS packages must be verified on macOS");
@@ -145,6 +174,7 @@ if (platform === "macos") {
     if (!pythonVersion.startsWith("Python 3.12."))
       throw new Error(artifactName + " bundles unexpected " + pythonVersion);
     await verifyBackendSource(resources);
+    await verifyNativeTools(resources, "macos", architecture);
 
     const minimum = await run("plutil", [
       "-extract",
@@ -185,6 +215,11 @@ if (platform === "macos") {
   await verifyBackendSource(
     path.join(packageDirectory, "win-unpacked", "resources"),
   );
+  await verifyNativeTools(
+    path.join(packageDirectory, "win-unpacked", "resources"),
+    "windows",
+    architecture,
+  );
   console.log("Verified " + artifactName);
 } else if (platform === "linux") {
   const entries = await fs.readdir(packageDirectory);
@@ -206,6 +241,11 @@ if (platform === "macos") {
     throw new Error(packages[0] + " bundles unexpected " + pythonVersion);
   await verifyBackendSource(
     path.join(packageDirectory, "linux-unpacked", "resources"),
+  );
+  await verifyNativeTools(
+    path.join(packageDirectory, "linux-unpacked", "resources"),
+    "linux",
+    architecture,
   );
   console.log("Verified " + packages[0]);
 } else {
