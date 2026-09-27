@@ -16,6 +16,7 @@ import { BackendInstaller } from "./backend-installer.js";
 import { readAutoDevices, runAutoBenchmark } from "./auto-benchmark.js";
 import { readPreferences, writePreferences } from "./preferences.js";
 import { SessionService } from "./session-service.js";
+import { stopSessionTrainers } from "./session-processes.js";
 import { inspectDataset, saveDataset } from "./dataset-editor.js";
 import { AppUpdateService } from "./updater.js";
 import { migrateLegacyV1Models } from "./model-migration.js";
@@ -28,6 +29,26 @@ let sessionService: SessionService;
 let updateService: AppUpdateService;
 let backendInstaller: BackendInstaller;
 let pendingMacInstaller = "";
+
+async function moveSessionToTrash(directory: string) {
+  let cleanupError: unknown;
+  try {
+    await stopSessionTrainers(directory);
+  } catch (error) {
+    cleanupError = error;
+  }
+  try {
+    await shell.trashItem(directory);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const cleanup = cleanupError
+      ? ` Trainer cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}.`
+      : "";
+    throw new Error(
+      `Could not move this session to Trash: ${reason}.${cleanup}`,
+    );
+  }
+}
 
 function userDataPath(...parts: string[]) {
   return path.join(app.getPath("userData"), ...parts);
@@ -307,14 +328,16 @@ function registerIpc() {
     async (_event, id: unknown, value: unknown) => {
       if (typeof id !== "string") throw new Error("Invalid training session");
       await migrateModelsIfIdle();
-      return sessionService.restart(id, value as TrainingRequest, (directory) =>
-        shell.trashItem(directory),
+      return sessionService.restart(
+        id,
+        value as TrainingRequest,
+        moveSessionToTrash,
       );
     },
   );
   ipcMain.handle("training:delete", async (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
-    await sessionService.remove(id, (directory) => shell.trashItem(directory));
+    await sessionService.remove(id, moveSessionToTrash);
   });
   ipcMain.handle("training:list", () => sessionService.list());
   ipcMain.handle("training:log", (_event, id: unknown) => {
