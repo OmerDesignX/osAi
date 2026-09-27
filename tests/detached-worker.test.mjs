@@ -122,7 +122,10 @@ test("MLX table iterations advance against the announced optimizer steps", async
       (value) => value.status === "running" && value.progress >= 25,
     );
     assert.equal(progressing.progress, 25);
-    assert.equal(progressing.message, "Fine-tuning update 3219 of 15011");
+    assert.match(
+      progressing.message,
+      /Fine-tuning: 3,219 of 15,011 \(21\.44%\)/,
+    );
     await waitFor(statePath, (value) => value.status === "completed");
   } finally {
     processHandle.kill("SIGKILL");

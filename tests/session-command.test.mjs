@@ -29,6 +29,7 @@ const base = {
   alignmentType: "grpo",
   optimizer: "auto",
   autoSettings: true,
+  fullContentContext: false,
   multiGpu: "auto",
   liveRollouts: true,
   sessionName: "My safe run",
@@ -506,6 +507,32 @@ test("uses an existing dataset directory without copying it", async () => {
       root,
     );
     await assert.rejects(fs.stat(path.join(root, "unused")));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("passes a Parquet file and full-content request to the CLI", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-parquet-source-"));
+  const source = path.join(root, "training.parquet");
+  await fs.writeFile(source, "PAR1");
+  try {
+    assert.equal(
+      await prepareDatasetSelection(source, path.join(root, "unused")),
+      source,
+    );
+    const { args } = await buildOsAiArgs(
+      {
+        ...base,
+        stage: "fine-tuning",
+        fineTuneData: source,
+        fullContentContext: true,
+      },
+      path.join(root, "sessions"),
+    );
+    assert.equal(args[args.indexOf("--data") + 1], source);
+    assert.equal(args.includes("--full-content-context"), true);
+    assert.equal(args.includes("--auto-settings"), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

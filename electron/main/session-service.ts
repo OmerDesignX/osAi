@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
-import { createReadStream } from "node:fs";
+import { closeSync, createReadStream, openSync } from "node:fs";
 import {
   phaseProgress,
   recoverFineTuneProgress,
@@ -380,17 +380,22 @@ export async function prepareDatasetSelection(
   source: string,
   destination: string,
   label = "Dataset",
+  copySingleFile = true,
 ) {
   const selected = await assertExistingPath(source, label);
   const stat = await fs.stat(selected);
   if (stat.isDirectory()) return selected;
   if (
     !stat.isFile() ||
-    ![".json", ".jsonl", ".ndjson"].includes(
+    ![".json", ".jsonl", ".ndjson", ".parquet"].includes(
       path.extname(selected).toLowerCase(),
     )
   )
-    throw new Error(`${label} must be a folder or a .json/.jsonl/.ndjson file`);
+    throw new Error(
+      `${label} must be a folder or a JSON, JSONL, NDJSON, or Parquet file`,
+    );
+  if (path.extname(selected).toLowerCase() === ".parquet") return selected;
+  if (!copySingleFile) return selected;
   await fs.mkdir(destination, { recursive: false, mode: 0o700 });
   const output = path.join(destination, "train.jsonl");
   if (path.extname(selected).toLowerCase() === ".json") {
@@ -474,17 +479,25 @@ export async function buildOsAiArgs(
 
   const needsFineTune = input.stage !== "alignment";
   const needsAlignment = input.stage !== "fine-tuning";
+  if (input.fullContentContext && needsFineTune)
+    args.push("--full-content-context");
   if (!input.autoSettings) {
     pushOptional(
       args,
       "--batch-size",
       optionalInteger(input.batchSize, "Batch size", 1, 65_536),
     );
-    pushOptional(
-      args,
-      "--max-seq-length",
-      optionalInteger(input.maxSeqLength, "Max sequence length", 32, 1_048_576),
-    );
+    if (!input.fullContentContext)
+      pushOptional(
+        args,
+        "--max-seq-length",
+        optionalInteger(
+          input.maxSeqLength,
+          "Max sequence length",
+          32,
+          1_048_576,
+        ),
+      );
     pushOptional(
       args,
       "--gguf-batch-size",
@@ -538,7 +551,7 @@ export async function buildOsAiArgs(
   if (needsFineTune) {
     args.push(
       "--data",
-      await assertDirectory(input.fineTuneData, "Fine-tuning dataset"),
+      await assertExistingPath(input.fineTuneData, "Fine-tuning dataset"),
     );
     args.push(
       "--epochs",
@@ -653,7 +666,7 @@ export async function buildOsAiArgs(
   if (needsAlignment) {
     args.push(
       "--alignment-data",
-      await assertDirectory(input.alignmentData, "Alignment dataset"),
+      await assertExistingPath(input.alignmentData, "Alignment dataset"),
       "--alignment-type",
       input.alignmentType,
       "--alignment-iterations",
@@ -778,7 +791,8 @@ export function restoreLegacyRequest(
   const data = argumentValue(args, "--data") || "";
   const alignmentData = argumentValue(args, "--alignment-data") || "";
   const reusedDataset =
-    data.includes(`${path.sep}.shared-fine-tuning`) && Boolean(alignmentData);
+    Boolean(data && alignmentData) &&
+    (data === alignmentData || data.includes(`${path.sep}.shared-fine-tuning`));
   return {
     sessionsRoot: path.dirname(state.sessionDirectory),
     modelSource: custom ? "custom" : "official",
@@ -802,6 +816,7 @@ export function restoreLegacyRequest(
     optimizer: (argumentValue(args, "--optimizer") ||
       "auto") as TrainingRequest["optimizer"],
     autoSettings: args.includes("--auto-settings"),
+    fullContentContext: args.includes("--full-content-context"),
     multiGpu: (argumentValue(args, "--multi-gpu") ||
       "auto") as TrainingRequest["multiGpu"],
     liveRollouts: !args.includes("--no-live-rollouts"),
@@ -1119,36 +1134,24 @@ export class SessionService {
     let prepared = input;
     let command: Awaited<ReturnType<typeof buildOsAiArgs>>;
     try {
-      if (input.stage === "fine-tune-align" && input.reuseDataset) {
-        const sharedSource = await prepareDatasetSelection(
+      prepared = { ...input };
+      if (input.stage !== "alignment")
+        prepared.fineTuneData = await prepareDatasetSelection(
           input.fineTuneData,
-          path.join(directory, ".shared-input"),
-          "Shared training dataset",
+          path.join(directory, ".fine-tune-input"),
+          "Fine-tuning dataset",
+          false,
         );
-        const shared = await prepareSharedFineTuneData(
-          sharedSource,
-          path.join(directory, ".shared-fine-tuning"),
-        );
-        prepared = {
-          ...input,
-          fineTuneData: shared,
-          alignmentData: sharedSource,
-        };
-      } else {
-        prepared = { ...input };
-        if (input.stage !== "alignment")
-          prepared.fineTuneData = await prepareDatasetSelection(
-            input.fineTuneData,
-            path.join(directory, ".fine-tune-input"),
-            "Fine-tuning dataset",
-          );
-        if (input.stage !== "fine-tuning")
-          prepared.alignmentData = await prepareDatasetSelection(
-            input.alignmentData,
-            path.join(directory, ".alignment-input"),
-            "Alignment dataset",
-          );
-      }
+      if (input.stage !== "fine-tuning")
+        prepared.alignmentData =
+          input.reuseDataset && input.stage === "fine-tune-align"
+            ? prepared.fineTuneData
+            : await prepareDatasetSelection(
+                input.alignmentData,
+                path.join(directory, ".alignment-input"),
+                "Alignment dataset",
+                false,
+              );
       command = await buildOsAiArgs(prepared, directory);
     } catch (error) {
       await fs.rm(directory, { recursive: true, force: true });
@@ -1193,13 +1196,19 @@ export class SessionService {
     const jobPath = path.join(directory, "job.json");
     await writePrivateJson(jobPath, job);
     await writePrivateJson(job.statePath, state);
-    const worker = spawn(process.execPath, [this.workerScript, jobPath], {
-      cwd: directory,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-    });
+    const workerLog = openSync(path.join(directory, "worker.log"), "a", 0o600);
+    let worker;
+    try {
+      worker = spawn(process.execPath, [this.workerScript, jobPath], {
+        cwd: directory,
+        detached: true,
+        stdio: ["ignore", workerLog, workerLog],
+        windowsHide: true,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      });
+    } finally {
+      closeSync(workerLog);
+    }
     await new Promise<void>((resolve, reject) => {
       worker.once("spawn", resolve);
       worker.once("error", reject);
@@ -1253,7 +1262,18 @@ export class SessionService {
         state.indeterminate = false;
         state.endedAt = new Date().toISOString();
         state.message = "The detached training worker ended unexpectedly";
-        state.error ||= "No live worker process was found";
+        const workerLogPath = path.join(state.sessionDirectory, "worker.log");
+        const workerOutput = await fs
+          .readFile(workerLogPath, "utf8")
+          .catch(() => "");
+        const lastDiagnostic = workerOutput
+          .trim()
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .at(-1);
+        state.error ||= lastDiagnostic
+          ? `Worker error: ${lastDiagnostic.slice(0, 500)} (see ${workerLogPath})`
+          : `The worker stopped without an error message; check ${workerLogPath} and system logs`;
         await writePrivateJson(
           path.join(state.sessionDirectory, "state.json"),
           state,

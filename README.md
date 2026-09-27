@@ -34,8 +34,8 @@ Both engines use reverse-mode gradients and update only LoRA adapter tensors. **
 
 For hybrid GGUF architectures, osAi selects each LoRA projection from the
 blocks where that tensor actually exists instead of assuming every block has
-attention weights. Long supervised records are trimmed from prompt context
-while retaining answer labels; plain-text corpora remain fully trainable.
+attention weights. Long supervised records use overlapping context windows
+that preserve every answer label; plain-text corpora remain fully trainable.
 
 ## Hardware support
 
@@ -63,7 +63,7 @@ The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SD
 2. For an osCode model, select **V2** (default) or **V1**, then choose its size. V2 also includes **xSmall**. For a custom model, press the folder button and select its model folder.
 3. Leave **Engine**, **Accelerator**, and **Multi-GPU** on **Auto** for hardware-aware selection, or choose them manually.
 4. Under **Pipeline**, press **Fine-tune**, **Align**, or **Fine-tune + align**.
-5. Press the dataset browse button and select a `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `train.jsonl`.
+5. Press the dataset browse button and select a `.json`, `.jsonl`, `.ndjson`, or `.parquet` file, or a folder containing data files.
 6. Keep **Fit settings to this hardware** enabled unless manual control is needed.
 7. Enter a recognizable **Session name**, or leave the suggested name in place.
 8. Choose **Save sessions in** when a different location is needed. The default is `~/osAi/sessions` in the user's home folder.
@@ -73,7 +73,7 @@ While a run is active, **Start training** becomes **Pause training** and **Stop 
 
 On the first launch after upgrading, complete V1 downloads in `~/osAi/models/MLX` or `~/osAi/models/GGUF` are made available under `~/osAi/models/V1` using same-volume hard links. This does not download or store another copy of the model, and the original paths remain valid for older sessions. The app never overwrites an existing V1 folder, leaves incomplete downloads untouched, and waits until active training has stopped before doing this. A legacy model remains usable if promotion is unavailable on its filesystem.
 
-Choose a single `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `train.jsonl` with optional `valid.jsonl` and `test.jsonl` splits. JSON arrays and objects containing `train`, `data`, `records`, `examples`, or `items` arrays are unpacked automatically.
+Choose a single `.json`, `.jsonl`, `.ndjson`, or `.parquet` file, or a folder containing several such files. All supported files in the folder and its subfolders are included. Filenames beginning with `valid`, `validation`, or `dev` become validation data, and filenames beginning with `test` become test data. Other data files train. Parquet is converted into session-local JSONL before training; the originals are left alone. JSON arrays and objects containing `train`, `data`, `records`, `examples`, or `items` arrays are unpacked automatically.
 
 | Dataset layout                  | Accepted fields                                                                                |
 | ------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -89,9 +89,9 @@ Choose a single `.json`, `.jsonl`, or `.ndjson` file, or a folder containing `tr
 Equivalent supervised layouts may be mixed in one split. osAi checks every row
 and converts it to one canonical local dataset. Image, audio, video, and
 multimodal content-part layouts are passed to a complete local quantized MLX VLM.
-Relative paths resolve beside the selected dataset file. The App copies the
-dataset and resolves its media references into the session, and it never fetches
-a media URL from a dataset.
+Relative paths resolve beside the selected dataset file. The CLI stages data
+inside the session when needed and resolves local media references. It never
+fetches a media URL from a dataset.
 
 Press **Data editor** above the session tabs, or **Inspect or repair training
 data** in the Data section, to scan a complete dataset before training. It
@@ -103,6 +103,14 @@ canonical copy without changing the source data. Selecting **Use for
 fine-tuning** or **Use for alignment** returns that copy to the training form;
 hardware fitting uses the model and available hardware; the dataset's row count
 and token-limit recommendation do not change the Auto training profile.
+
+After selecting fine-tuning data, press **Use largest record as context** to
+scan all training records and request a context that holds the largest one.
+The model tokenizer determines the count. Overlapping windows remain the
+default because a full record can exceed the model's context limit or device
+memory. If Auto encounters a device memory limit, it retries with smaller
+windows and shows that adjustment in the session status. All supervised answer
+tokens still train through overlapping windows.
 
 Choose a complete VLM under **Custom model** for media training. For a GGUF VLM,
 the same custom model folder must also contain its matching quantized MLX VLM;

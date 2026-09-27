@@ -156,6 +156,7 @@ const defaults: TrainingRequest = {
   alignmentType: "auto",
   optimizer: "auto",
   autoSettings: true,
+  fullContentContext: false,
   multiGpu: "auto",
   liveRollouts: true,
   sessionName: "",
@@ -736,7 +737,14 @@ export function App() {
         (value, index, values) => value && values.indexOf(value) === index,
       );
       for (const source of dataSources) {
-        const inspection = await window.osai.inspectDataset(source);
+        if (source.toLowerCase().endsWith(".parquet")) continue;
+        let inspection;
+        try {
+          inspection = await window.osai.inspectDataset(source);
+        } catch (error) {
+          if (readableError(error).includes("contains no JSON")) continue;
+          throw error;
+        }
         if (inspection.invalidRows > 0) {
           openDataEditor(source);
           throw new Error(
@@ -1310,7 +1318,7 @@ export function App() {
                   <PathField
                     label="Fine-tuning dataset"
                     value={form.fineTuneData}
-                    placeholder="Dataset folder or JSON file"
+                    placeholder="Dataset folder or JSON, JSONL, Parquet file"
                     onChange={(fineTuneData) =>
                       setForm({ ...form, fineTuneData })
                     }
@@ -1321,6 +1329,31 @@ export function App() {
                       )
                     }
                   />
+                )}
+                {needsFineTune && form.fineTuneData && (
+                  <button
+                    type="button"
+                    className="quiet-button data-editor-launch"
+                    aria-pressed={form.fullContentContext}
+                    onClick={() =>
+                      setForm((current) => ({
+                        ...current,
+                        fullContentContext: !current.fullContentContext,
+                      }))
+                    }
+                  >
+                    <Icon name="maximize-2" />
+                    {form.fullContentContext
+                      ? "Use overlapping windows (default)"
+                      : "Use largest record as context"}
+                  </button>
+                )}
+                {needsFineTune && form.fullContentContext && (
+                  <p className="field-hint">
+                    The trainer will scan all selected files before training. If
+                    the full record exceeds model or device memory, use
+                    overlapping windows.
+                  </p>
                 )}
                 {stage === "fine-tune-align" && (
                   <label className="toggle-row compact">
@@ -1571,7 +1604,7 @@ export function App() {
                         label="Training token limit"
                         value={form.maxSeqLength}
                         min={32}
-                        disabled={form.autoSettings}
+                        disabled={form.autoSettings || form.fullContentContext}
                         placeholder="64"
                         hint="Maximum prompt + answer tokens per training example."
                         onChange={(maxSeqLength) =>

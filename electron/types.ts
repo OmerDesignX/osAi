@@ -49,6 +49,7 @@ export type TrainingRequest = {
   alignmentType: AlignmentType;
   optimizer: Optimizer;
   autoSettings: boolean;
+  fullContentContext: boolean;
   multiGpu: "auto" | "on" | "off";
   liveRollouts: boolean;
   sessionName: string;

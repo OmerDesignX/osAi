@@ -14,6 +14,14 @@ import type {
 } from "../types.js";
 
 const DATA_EXTENSIONS = new Set([".json", ".jsonl", ".ndjson"]);
+const METADATA_FILES = new Set([
+  "dataset.json",
+  "dataset_info.json",
+  "manifest.json",
+  "metadata.json",
+  "schema.json",
+  "config.json",
+]);
 const MAX_JSON_DOCUMENT_BYTES = 256 * 1024 * 1024;
 const MAX_ISSUES = 100;
 const MAX_VALID_PREVIEW = 25;
@@ -168,23 +176,36 @@ async function sourceFiles(sourceValue: string): Promise<SourceFile[]> {
   }
   if (!details.isDirectory())
     throw new Error("Dataset source is not a file or folder");
-  const entries = (await fs.readdir(source, { withFileTypes: true }))
-    .filter(
-      (entry) =>
+  const entries: string[] = [];
+  const pending = [source];
+  while (pending.length) {
+    const directory = pending.pop()!;
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      const child = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (
+          !entry.name.startsWith(".") &&
+          !["__pycache__", "node_modules"].includes(entry.name)
+        )
+          pending.push(child);
+      } else if (
         entry.isFile() &&
-        DATA_EXTENSIONS.has(path.extname(entry.name).toLowerCase()),
-    )
-    .map((entry) => path.join(source, entry.name))
-    .sort((left, right) => left.localeCompare(right));
+        DATA_EXTENSIONS.has(path.extname(entry.name).toLowerCase()) &&
+        !METADATA_FILES.has(entry.name.toLowerCase())
+      )
+        entries.push(child);
+    }
+  }
+  entries.sort((left, right) => left.localeCompare(right));
   if (!entries.length)
     throw new Error(
       "The selected folder contains no JSON, JSONL, or NDJSON files",
     );
-  const named = entries
-    .map((file) => ({ file, split: splitForFilename(file) }))
-    .filter((entry): entry is SourceFile => entry.split !== null);
-  if (named.length) return named;
-  return entries.map((file) => ({ file, split: "train" }));
+  return entries.map((file) => ({
+    file,
+    split: splitForFilename(file) || "train",
+  }));
 }
 
 function recordsFromDocument(

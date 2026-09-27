@@ -203,7 +203,7 @@ function registerIpc() {
         title: safeTitle,
         message: "Choose a dataset source",
         detail:
-          "Select one JSON, JSONL, or NDJSON file or a folder containing dataset splits.",
+          "Select one JSON, JSONL, NDJSON, or Parquet file or a folder containing dataset files.",
         buttons: ["Choose data file", "Choose folder", "Cancel"],
         defaultId: 0,
         cancelId: 2,
@@ -216,7 +216,12 @@ function registerIpc() {
       title: safeTitle,
       properties,
       filters: properties.includes("openFile")
-        ? [{ name: "JSON datasets", extensions: ["json", "jsonl", "ndjson"] }]
+        ? [
+            {
+              name: "Datasets",
+              extensions: ["json", "jsonl", "ndjson", "parquet"],
+            },
+          ]
         : undefined,
     });
     return result.canceled ? "" : result.filePaths[0] || "";

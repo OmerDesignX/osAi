@@ -29,11 +29,28 @@ let fineTuneProgress: FineTuneProgressParser;
 
 async function atomicStateWrite() {
   const snapshot = JSON.stringify(state, null, 2);
-  writeChain = writeChain.then(async () => {
-    const temporary = `${job.statePath}.${process.pid}.tmp`;
-    await fs.writeFile(temporary, `${snapshot}\n`, { mode: 0o600 });
-    await fs.rename(temporary, job.statePath);
-  });
+  writeChain = writeChain
+    .catch(() => undefined)
+    .then(async () => {
+      const temporary = `${job.statePath}.${process.pid}.tmp`;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          await fs.writeFile(temporary, `${snapshot}\n`, { mode: 0o600 });
+          await fs.rename(temporary, job.statePath);
+          return;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (
+            !["EACCES", "EPERM", "EBUSY"].includes(code || "") ||
+            attempt === 4
+          )
+            throw error;
+          await new Promise((resolve) =>
+            setTimeout(resolve, 100 * 2 ** attempt),
+          );
+        }
+      }
+    });
   await writeChain;
 }
 
@@ -42,7 +59,9 @@ function scheduleStateWrite(immediate = false) {
   if (immediate) return atomicStateWrite();
   writeTimer = setTimeout(() => {
     writeTimer = null;
-    void atomicStateWrite();
+    void atomicStateWrite().catch((error) => {
+      console.error("osAi worker state write failed:", error);
+    });
   }, 250);
   writeTimer.unref();
   return Promise.resolve();
@@ -55,6 +74,40 @@ function clamp(value: number) {
 function consumeLine(raw: string) {
   const line = cleanTerminalLine(raw);
   if (!line) return;
+  if (/^osai: full content scan\b/i.test(line)) {
+    const records = /\brecords=(\d+)/.exec(line)?.[1];
+    state.phase = "preparing";
+    state.indeterminate = true;
+    state.message = records
+      ? `Scanning ${Number(records).toLocaleString()} records for maximum context`
+      : "Scanning the selected dataset for maximum context";
+    void scheduleStateWrite();
+    return;
+  }
+  if (/^osai: preparing dataset\b/i.test(line)) {
+    const split = /\bsplit=(\w+)/.exec(line)?.[1] || "training";
+    state.phase = "preparing";
+    state.indeterminate = true;
+    state.message = `Converting and merging ${split} dataset files locally`;
+    void scheduleStateWrite();
+    return;
+  }
+  if (/^osai: full content\b/i.test(line)) {
+    const context = /\bcontext=(\d+)/.exec(line)?.[1];
+    const records = /\brecords=(\d+)/.exec(line)?.[1];
+    state.phase = "preparing";
+    state.indeterminate = true;
+    state.message = context
+      ? `Largest of ${Number(records || 0).toLocaleString()} records selected · ${Number(context).toLocaleString()} token context`
+      : "Largest training record selected as context";
+    if (state.autoSettingsSummary && context)
+      state.autoSettingsSummary = state.autoSettingsSummary.replace(
+        /Context \d+/,
+        `Context ${context}`,
+      );
+    void scheduleStateWrite();
+    return;
+  }
   if (/^osai: auto settings\b/i.test(line)) {
     const fields = Object.fromEntries(
       [...line.matchAll(/\b([a-z_]+)=([^\s]+)/gi)].map((match) => [
@@ -169,7 +222,12 @@ function consumeLine(raw: string) {
       state.progress = clamp(
         phaseProgress(completed, total, "fine-tuning", job.stage),
       );
-      state.message = `Fine-tuning update ${completed} of ${total}`;
+      const percentComplete = ((100 * completed) / Math.max(1, total)).toFixed(
+        2,
+      );
+      state.message =
+        `Fine-tuning: ${completed.toLocaleString()} of ${total.toLocaleString()} ` +
+        `(${percentComplete}%)`;
     } else if (lower.includes("publish") || lower.includes("fusion")) {
       state.phase = "publishing";
       state.indeterminate = true;
@@ -470,7 +528,9 @@ async function main() {
     });
   });
   const stopPoll = setInterval(() => {
-    void checkControlRequests();
+    void checkControlRequests().catch((error) => {
+      console.error("osAi worker control check failed:", error);
+    });
   }, 300);
   stopPoll.unref();
   process.on("SIGTERM", () => void terminateTree());
