@@ -26,6 +26,7 @@ let actionableStderrScore = 0;
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
 let writeChain = Promise.resolve();
 let fineTuneProgress: FineTuneProgressParser;
+let lastCheckpointRequest = "";
 
 async function atomicStateWrite() {
   const snapshot = JSON.stringify(state, null, 2);
@@ -74,6 +75,40 @@ function clamp(value: number) {
 function consumeLine(raw: string) {
   const line = cleanTerminalLine(raw);
   if (!line) return;
+  const checkpoint =
+    /osai: checkpoint saved path=(.+?) generation=([^\s]+)/i.exec(line);
+  if (checkpoint) {
+    if (checkpoint[2] !== "auto" && checkpoint[2] !== "final")
+      lastCheckpointRequest = checkpoint[2];
+    const savedPath = path.resolve(checkpoint[1]);
+    const relative = path.relative(job.sessionDirectory, savedPath);
+    if (
+      !relative.startsWith("..") &&
+      !path.isAbsolute(relative) &&
+      /[\\/]outputs[\\/]checkpoint[\\/]/i.test(savedPath)
+    ) {
+      state.checkpointStatus = "saved";
+      state.checkpointSavedAt = new Date().toISOString();
+      state.checkpointPath = savedPath;
+      void scheduleStateWrite(true);
+    }
+    return;
+  }
+  const checkpointModel = /osai: checkpoint model ready path=(.+)$/i.exec(line);
+  if (checkpointModel) {
+    const modelPath = path.resolve(checkpointModel[1]);
+    const relative = path.relative(job.sessionDirectory, modelPath);
+    if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+      state.checkpointModelPath = modelPath;
+      void scheduleStateWrite(true);
+    }
+    return;
+  }
+  if (/osai: checkpoint failed\b/i.test(line)) {
+    state.checkpointStatus = "failed";
+    void scheduleStateWrite(true);
+    return;
+  }
   if (/^osai: full content scan\b/i.test(line)) {
     const records = /\brecords=(\d+)/.exec(line)?.[1];
     state.phase = "preparing";
@@ -355,6 +390,19 @@ async function checkControlRequests() {
       await fs.rm(resumePath, { force: true });
       await resumeTraining();
     }
+    if (
+      job.checkpointRequestPath &&
+      (await exists(job.checkpointRequestPath))
+    ) {
+      const generation = (
+        await fs.readFile(job.checkpointRequestPath, "utf8")
+      ).trim();
+      if (generation && generation !== lastCheckpointRequest) {
+        lastCheckpointRequest = generation;
+        state.checkpointStatus = "requested";
+        await scheduleStateWrite(true);
+      }
+    }
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error);
     state.message = "The requested training control could not be applied";
@@ -469,6 +517,9 @@ async function main() {
       ...backendEnvironment,
       PYTHONUNBUFFERED: "1",
       OSAI_APP_SESSION: job.id,
+      ...(job.checkpointRequestPath
+        ? { OSAI_CHECKPOINT_REQUEST: job.checkpointRequestPath }
+        : {}),
     },
   });
   child.stdout?.pipe(log, { end: false });

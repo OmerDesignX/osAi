@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  datasetTrainingSummary,
   inspectDataset,
   saveDataset,
 } from "../dist-electron/main/dataset-editor.js";
@@ -15,6 +16,21 @@ async function writeRows(file, rows) {
     "utf8",
   );
 }
+
+test("training summary counts all supported files, including Parquet, without reading rows", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-data-summary-"));
+  try {
+    await fs.writeFile(path.join(root, "train.jsonl"), "12345");
+    await fs.writeFile(path.join(root, "part.parquet"), "1234567");
+    await fs.writeFile(path.join(root, "ignore.txt"), "123456789");
+    assert.deepEqual(await datasetTrainingSummary(root), {
+      fileCount: 2,
+      totalBytes: 12,
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("inspects common chat, QA, translation, code, and preference layouts", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-data-inspect-"));

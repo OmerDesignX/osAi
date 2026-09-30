@@ -84,6 +84,7 @@ type BackendSourceManifest = {
   repository: string;
   archive: string;
   ref: string;
+  revision: string;
 };
 
 export function trustedBackendArchiveUrl(raw: string) {
@@ -95,7 +96,7 @@ export function trustedBackendArchiveUrl(raw: string) {
       url.password === "" &&
       url.port === "" &&
       url.hostname === "codeload.github.com" &&
-      url.pathname.startsWith("/OmerDesignX/osAi-CLI/zip/")
+      url.pathname === "/OmerDesignX/osAi-CLI/zip/refs/heads/main"
     );
   } catch {
     return false;
@@ -110,7 +111,8 @@ async function readSourceManifest(file: string) {
     if (
       value.repository !== "https://github.com/OmerDesignX/osAi-CLI" ||
       !trustedBackendArchiveUrl(value.archive) ||
-      !value.ref
+      value.ref !== "main" ||
+      !value.revision
     )
       return null;
     return value;
@@ -134,7 +136,7 @@ export async function backendInstallationIsCurrent(
     relative === ".." ||
     path.isAbsolute(relative)
   )
-    return true;
+    return false;
 
   const [installId] = relative.split(path.sep);
   const installRoot = path.join(root, installId);
@@ -153,7 +155,8 @@ export async function backendInstallationIsCurrent(
     installed &&
     source &&
     expected.archive === installed.archive &&
-    expected.ref === installed.ref,
+    expected.ref === installed.ref &&
+    expected.revision === installed.revision,
   );
 }
 
@@ -494,6 +497,13 @@ export class BackendInstaller {
         throw new Error(
           check.stderr.trim() ||
             "The installed executable did not identify itself as the osAi CLI",
+        );
+      if (
+        version.toLowerCase() !==
+        `osai ${sourceManifest.revision}`.toLowerCase()
+      )
+        throw new Error(
+          `Downloaded CLI version ${version} does not match expected ${sourceManifest.revision}`,
         );
       await fs.writeFile(
         path.join(installRoot, "OSAI_BACKEND_SOURCE.json"),

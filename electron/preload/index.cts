@@ -19,9 +19,12 @@ const bridge: OsAiBridge = {
     ipcRenderer.invoke("dialog:choose-dataset", title),
   chooseFile: (title: string) =>
     ipcRenderer.invoke("dialog:choose-file", title),
-  chooseBackend: () => ipcRenderer.invoke("dialog:choose-backend"),
   inspectDataset: (source: string) =>
     ipcRenderer.invoke("dataset:inspect", source),
+  datasetTrainingSummary: (source: string) =>
+    ipcRenderer.invoke("dataset:training-summary", source),
+  modelTrainingSummary: (source: string) =>
+    ipcRenderer.invoke("model:training-summary", source),
   saveDataset: (value) => ipcRenderer.invoke("dataset:save", value),
   backendStatus: () => ipcRenderer.invoke("backend:status"),
   backendInstallStatus: () => ipcRenderer.invoke("backend-install:status"),
@@ -34,6 +37,7 @@ const bridge: OsAiBridge = {
     ipcRenderer.invoke("training:start", value),
   pauseTraining: (id: string) => ipcRenderer.invoke("training:pause", id),
   resumeTraining: (id: string) => ipcRenderer.invoke("training:resume", id),
+  saveCheckpoint: (id: string) => ipcRenderer.invoke("training:checkpoint", id),
   stopTraining: (id: string) => ipcRenderer.invoke("training:stop", id),
   restartSession: (id: string, value: TrainingRequest) =>
     ipcRenderer.invoke("training:restart", id, value),

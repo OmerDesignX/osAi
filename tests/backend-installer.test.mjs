@@ -167,6 +167,7 @@ test("managed backends update when the CLI download reference changes", async ()
     archive:
       "https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/main",
     ref: "main",
+    revision: "0.1.4",
   };
   try {
     await fs.mkdir(path.dirname(executable), { recursive: true });
@@ -262,13 +263,25 @@ test("managed backends update when the CLI download reference changes", async ()
       ),
       true,
     );
+    await fs.writeFile(
+      path.join(install, "OSAI_BACKEND_SOURCE.json"),
+      JSON.stringify({ ...packagedManifest, revision: "0.1.3" }),
+    );
+    assert.equal(
+      await backendInstallationIsCurrent(
+        executable,
+        installations,
+        sourceManifest,
+      ),
+      false,
+    );
     assert.equal(
       await backendInstallationIsCurrent(
         path.join(root, "external", "osai"),
         installations,
         sourceManifest,
       ),
-      true,
+      false,
     );
     await fs.rm(downloadedSource, { recursive: true, force: true });
     assert.equal(

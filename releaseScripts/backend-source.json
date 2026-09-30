@@ -1,5 +1,6 @@
 {
   "repository": "https://github.com/OmerDesignX/osAi-CLI",
   "archive": "https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/main",
-  "ref": "main"
+  "ref": "main",
+  "revision": "0.1.4"
 }

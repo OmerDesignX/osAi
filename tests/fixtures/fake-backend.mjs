@@ -1,4 +1,23 @@
-if (process.argv.includes("--fail")) {
+import fs from "node:fs";
+import path from "node:path";
+
+if (process.argv.includes("--checkpoint")) {
+  const request = process.env.OSAI_CHECKPOINT_REQUEST;
+  const generation = fs.readFileSync(request, "utf8").trim();
+  const output = path.join(
+    path.dirname(request),
+    "outputs",
+    "checkpoint",
+    "adapter",
+    "last.gguf",
+  );
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, "adapter");
+  process.stdout.write(
+    `osai: checkpoint saved path=${output} generation=${generation}\n`,
+  );
+  setTimeout(() => process.exit(0), 900);
+} else if (process.argv.includes("--fail")) {
   process.stderr.write("osai: unsupported dataset schema at train.jsonl:1\n");
   process.stderr.write("osai: command exited with status 2; see log\n");
   process.exit(2);

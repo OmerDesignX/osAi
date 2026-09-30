@@ -94,6 +94,7 @@ export type TrainingRequest = {
 export type AutoBenchmarkResult = {
   settings: {
     profile: "compact" | "balanced" | "performance" | "maximum";
+    model_size_bytes: number;
     batch_size: number;
     max_seq_length: number;
     num_layers: number;
@@ -139,6 +140,10 @@ export type SessionState = {
   message: string;
   autoSettingsSummary?: string;
   adjustment?: string;
+  checkpointStatus?: "requested" | "saved" | "failed";
+  checkpointSavedAt?: string;
+  checkpointPath?: string;
+  checkpointModelPath?: string;
   createdAt: string;
   startedAt?: string;
   endedAt?: string;
@@ -284,8 +289,11 @@ export type OsAiBridge = {
   chooseDirectory(title: string): Promise<string>;
   chooseDataset(title: string): Promise<string>;
   chooseFile(title: string): Promise<string>;
-  chooseBackend(): Promise<string>;
   inspectDataset(source: string): Promise<DatasetInspection>;
+  datasetTrainingSummary(
+    source: string,
+  ): Promise<{ fileCount: number; totalBytes: number }>;
+  modelTrainingSummary(source: string): Promise<number>;
   saveDataset(value: DatasetEditorRequest): Promise<DatasetEditorResult>;
   backendStatus(): Promise<BackendStatus>;
   backendInstallStatus(): Promise<BackendInstallStatus>;
@@ -297,6 +305,7 @@ export type OsAiBridge = {
   startTraining(value: TrainingRequest): Promise<SessionState>;
   pauseTraining(id: string): Promise<SessionState>;
   resumeTraining(id: string): Promise<SessionState>;
+  saveCheckpoint(id: string): Promise<SessionState>;
   stopTraining(id: string): Promise<SessionState>;
   restartSession(id: string, value: TrainingRequest): Promise<SessionState>;
   deleteSession(id: string): Promise<void>;

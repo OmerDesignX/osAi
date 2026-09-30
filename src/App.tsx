@@ -17,9 +17,15 @@ import type {
 } from "./types.js";
 import osAiIcon from "./assets/osai-icon.png";
 import {
+  estimatedModelBytes,
   selectHardwarePreset,
   type HardwarePreset,
 } from "./hardware-presets.js";
+import {
+  fittedChoices,
+  learningRateOptions,
+  type LearningPace,
+} from "./lora-guidance.js";
 import { DataEditor } from "./DataEditor.js";
 import { TrainingWiki } from "./TrainingWiki.js";
 
@@ -308,6 +314,13 @@ export function App() {
   const [form, setForm] = useState(defaults);
   const [sameDataset, setSameDataset] = useState(true);
   const [advanced, setAdvanced] = useState(false);
+  const [guidanceOpen, setGuidanceOpen] = useState(false);
+  const [learningPace, setLearningPace] = useState<LearningPace | null>(null);
+  const [datasetSummary, setDatasetSummary] = useState<{
+    fileCount: number;
+    totalBytes: number;
+  } | null>(null);
+  const [datasetSummaryError, setDatasetSummaryError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -322,6 +335,10 @@ export function App() {
   const [benchmarkPreset, setBenchmarkPreset] = useState<HardwarePreset | null>(
     null,
   );
+  const [benchmarkModelBytes, setBenchmarkModelBytes] = useState<number | null>(
+    null,
+  );
+  const [customModelBytes, setCustomModelBytes] = useState<number | null>(null);
   const [benchmarkDevices, setBenchmarkDevices] = useState<string[]>([]);
   const [benchmarkMessage, setBenchmarkMessage] = useState("");
   const [deviceSignature, setDeviceSignature] = useState<string | null>(null);
@@ -343,7 +360,7 @@ export function App() {
   const [restartingSession, setRestartingSession] = useState(false);
   const [starting, setStarting] = useState(false);
   const [sessionControl, setSessionControl] = useState<
-    "" | "pausing" | "resuming" | "stopping"
+    "" | "pausing" | "resuming" | "saving" | "stopping"
   >("");
   const [showLogLatest, setShowLogLatest] = useState(false);
   const [wikiOpen, setWikiOpen] = useState(false);
@@ -373,6 +390,137 @@ export function App() {
     [hardware, form.engine, form.tier, form.modelVersion],
   );
   const hardwarePreset = benchmarkPreset || fallbackPreset;
+  const guidanceBatchChoices = fittedChoices(
+    hardwarePreset.batchSize,
+    [1, 2, 4, 8, 16],
+  );
+  const guidanceRankChoices = fittedChoices(
+    hardwarePreset.rank,
+    [1, 2, 4, 8, 16, 32],
+  );
+  const rateOptions = useMemo(
+    () =>
+      learningRateOptions({
+        datasetBytes: datasetSummary?.totalBytes ?? null,
+        modelBytes:
+          form.modelSource === "custom"
+            ? ((form.autoSettings ? benchmarkModelBytes : null) ??
+              customModelBytes ??
+              3 * 1024 ** 3)
+            : ((form.autoSettings ? benchmarkModelBytes : null) ??
+              estimatedModelBytes(
+                hardware,
+                form.engine,
+                form.tier,
+                form.modelVersion,
+              )),
+        memoryBytes: hardware.physicalMemoryBytes,
+        batchSize: form.batchSize ?? hardwarePreset.batchSize,
+        rank: form.rank ?? hardwarePreset.rank,
+        epochs: form.iterations,
+      }),
+    [
+      datasetSummary?.totalBytes,
+      benchmarkModelBytes,
+      customModelBytes,
+      form.modelSource,
+      form.autoSettings,
+      form.engine,
+      form.tier,
+      form.modelVersion,
+      form.batchSize,
+      form.rank,
+      form.iterations,
+      hardware,
+      hardwarePreset.batchSize,
+      hardwarePreset.rank,
+    ],
+  );
+  const rateSelection =
+    learningPace ?? (form.learningRate === null ? "backend" : "previous");
+  const needsGuidanceMetadata = guidanceOpen || learningPace !== null;
+  const selectRate = (value: string) => {
+    const selectedRate = rateOptions.find((option) => option.pace === value);
+    setLearningPace(selectedRate?.pace ?? null);
+    setForm((current) => ({
+      ...current,
+      learningRate: selectedRate?.rate ?? null,
+    }));
+  };
+
+  useEffect(() => {
+    if (!needsGuidanceMetadata) return;
+    setDatasetSummary(null);
+    if (!form.fineTuneData.trim()) {
+      setDatasetSummary(null);
+      setDatasetSummaryError("");
+      return;
+    }
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void window.osai
+        .datasetTrainingSummary(form.fineTuneData.trim())
+        .then((summary) => {
+          if (current) {
+            setDatasetSummary(summary);
+            setDatasetSummaryError("");
+          }
+        })
+        .catch((error) => {
+          if (current) {
+            setDatasetSummary(null);
+            setDatasetSummaryError(readableError(error));
+          }
+        });
+    }, 300);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [needsGuidanceMetadata, form.fineTuneData]);
+
+  useEffect(() => {
+    if (form.modelSource !== "custom" || !needsGuidanceMetadata) return;
+    setCustomModelBytes(null);
+    if (!form.customModelFolder.trim()) return;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void window.osai
+        .modelTrainingSummary(form.customModelFolder.trim())
+        .then((bytes) => {
+          if (current) setCustomModelBytes(bytes);
+        })
+        .catch(() => {
+          if (current) setCustomModelBytes(null);
+        });
+    }, 300);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [needsGuidanceMetadata, form.modelSource, form.customModelFolder]);
+
+  useEffect(() => {
+    if (!learningPace) return;
+    const rate = rateOptions.find(
+      (option) => option.pace === learningPace,
+    )?.rate;
+    if (rate !== undefined)
+      setForm((current) =>
+        current.learningRate === rate
+          ? current
+          : { ...current, learningRate: rate },
+      );
+  }, [learningPace, rateOptions]);
+
+  useEffect(() => {
+    if (!guidanceOpen) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setGuidanceOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [guidanceOpen]);
 
   const refreshSessions = useCallback(async () => {
     const next = await window.osai.listSessions();
@@ -487,6 +635,7 @@ export function App() {
     if (form.modelSource === "custom" && !form.customModelFolder) return;
     let current = true;
     setBenchmarkPreset(null);
+    setBenchmarkModelBytes(null);
     setBenchmarkBusy(true);
     setBenchmarkMessage("");
     const timer = window.setTimeout(() => {
@@ -505,6 +654,7 @@ export function App() {
             ggufThreads: settings.gguf_threads,
             targetModules: settings.target_modules,
           });
+          setBenchmarkModelBytes(settings.model_size_bytes);
           setBenchmarkDevices(result.devices);
           setBenchmarkMessage(
             `Auto settings: ${settings.max_seq_length}-token context${result.engine === "llama.cpp" ? `, ${settings.gguf_batch_size} GGUF microbatch` : ""} for ${result.devices.length ? result.devices.join(", ") : "CPU"}.`,
@@ -579,6 +729,7 @@ export function App() {
 
   useEffect(() => {
     if (!selected) {
+      setLearningPace(null);
       setForm({
         ...defaults,
         sessionsRoot: preferences.sessionsRoot,
@@ -588,6 +739,7 @@ export function App() {
       return;
     }
     if (!selected.request) return;
+    setLearningPace(null);
     const restored = Object.fromEntries(
       Object.entries(selected.request).filter(
         ([, value]) => value !== undefined,
@@ -664,16 +816,6 @@ export function App() {
     setPreferences(await window.osai.savePreferences(next));
   };
 
-  const saveAndCheckBackend = async (next: Preferences) => {
-    setNotice("");
-    try {
-      await savePreferences(next);
-      await refreshBackend();
-    } catch (error) {
-      setNotice(readableError(error));
-    }
-  };
-
   const setTheme = (theme: Theme) => {
     void savePreferences({ ...preferences, theme });
   };
@@ -722,7 +864,7 @@ export function App() {
       setBackend(backendState);
       if (!backendState.available)
         throw new Error(
-          "Install osAi CLI or select its executable in Settings before training.",
+          "Install the current osAi CLI from main before training.",
         );
       const dataSources = [
         ...(form.stage !== "alignment" ? [form.fineTuneData] : []),
@@ -809,6 +951,20 @@ export function App() {
     setSessionControl("resuming");
     try {
       await window.osai.resumeTraining(id);
+      await refreshSessions();
+    } catch (error) {
+      setNotice(readableError(error));
+    } finally {
+      setSessionControl("");
+    }
+  };
+
+  const saveCheckpoint = async (id: string) => {
+    setNotice("");
+    setSessionControl("saving");
+    try {
+      await window.osai.saveCheckpoint(id);
+      setNotice("Checkpoint requested. Saving at the next safe training step.");
       await refreshSessions();
     } catch (error) {
       setNotice(readableError(error));
@@ -1486,17 +1642,244 @@ export function App() {
                       </small>
                     </span>
                   </label>
-                  <button
-                    type="button"
-                    className="quiet-button compact-button"
-                    onClick={() => setAdvanced(!advanced)}
-                    aria-expanded={advanced}
-                  >
-                    {advanced ? "Hide advanced" : "Advanced"}
-                    <Icon name={advanced ? "chevron-up" : "chevron-down"} />
-                  </button>
+                  <div className="settings-actions">
+                    {needsFineTune && (
+                      <button
+                        type="button"
+                        className="quiet-button compact-button"
+                        onClick={() => setGuidanceOpen(true)}
+                        aria-haspopup="dialog"
+                      >
+                        <Icon name="sliders" /> Guidance
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="quiet-button compact-button"
+                      onClick={() => setAdvanced(!advanced)}
+                      aria-expanded={advanced}
+                    >
+                      {advanced ? "Hide advanced" : "Advanced"}
+                      <Icon name={advanced ? "chevron-up" : "chevron-down"} />
+                    </button>
+                  </div>
                 </div>
               </section>
+
+              {guidanceOpen &&
+                createPortal(
+                  <div
+                    className="guidance-backdrop"
+                    onPointerDown={(event) => {
+                      if (event.target === event.currentTarget)
+                        setGuidanceOpen(false);
+                    }}
+                  >
+                    <section
+                      className="guidance-card"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="guidance-title"
+                    >
+                      <div className="guidance-header">
+                        <div>
+                          <h2 id="guidance-title">LoRA guidance</h2>
+                          <p>Core settings for this training run.</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={() => setGuidanceOpen(false)}
+                          aria-label="Close guidance"
+                        >
+                          <Icon name="x" />
+                        </button>
+                      </div>
+                      <div className="guidance-context">
+                        <span>
+                          {form.modelSource === "custom"
+                            ? "Custom model"
+                            : `osCode ${form.modelVersion.toUpperCase()} · ${form.tier}`}
+                        </span>
+                        <span>
+                          {datasetSummary
+                            ? `${datasetSummary.fileCount} file${datasetSummary.fileCount === 1 ? "" : "s"} · ${(datasetSummary.totalBytes / 1024 ** 2).toFixed(1)} MiB`
+                            : datasetSummaryError
+                              ? "Dataset unavailable"
+                              : "Select a dataset for tailored rates"}
+                        </span>
+                        <span>
+                          {benchmarkBusy
+                            ? "Measuring hardware…"
+                            : `${phaseLabel(hardwarePreset.profile)} hardware fit`}
+                        </span>
+                      </div>
+                      <div className="guidance-fields">
+                        <label className="field">
+                          <span>Epochs</span>
+                          <select
+                            value={form.iterations}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                iterations: Number(event.target.value),
+                              }))
+                            }
+                          >
+                            {[...new Set([1, 2, 3, 5, 8, form.iterations])]
+                              .sort((a, b) => a - b)
+                              .map((value) => (
+                                <option key={value} value={value}>
+                                  {value} pass{value === 1 ? "" : "es"}
+                                </option>
+                              ))}
+                          </select>
+                          <small>How many times the dataset is seen.</small>
+                        </label>
+                        <label className="field">
+                          <span>Batch</span>
+                          <select
+                            value={
+                              form.autoSettings
+                                ? "auto"
+                                : String(
+                                    form.batchSize ?? hardwarePreset.batchSize,
+                                  )
+                            }
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setForm((current) =>
+                                value === "auto"
+                                  ? applyHardwarePreset(current, hardwarePreset)
+                                  : {
+                                      ...(current.autoSettings
+                                        ? applyHardwarePreset(
+                                            current,
+                                            hardwarePreset,
+                                          )
+                                        : current),
+                                      autoSettings: false,
+                                      batchSize: Number(value),
+                                    },
+                              );
+                            }}
+                          >
+                            <option value="auto">
+                              Auto · {hardwarePreset.batchSize}
+                            </option>
+                            {!form.autoSettings &&
+                              form.batchSize !== null &&
+                              !guidanceBatchChoices.includes(
+                                form.batchSize,
+                              ) && (
+                                <option value={form.batchSize}>
+                                  Current · {form.batchSize}
+                                  {form.batchSize > hardwarePreset.batchSize
+                                    ? " (above fit)"
+                                    : ""}
+                                </option>
+                              )}
+                            {guidanceBatchChoices.map((value) => (
+                              <option key={value} value={value}>
+                                {value}
+                              </option>
+                            ))}
+                          </select>
+                          <small>Choices stay within the fitted batch.</small>
+                        </label>
+                        <label className="field">
+                          <span>LoRA rank</span>
+                          <select
+                            value={
+                              form.autoSettings
+                                ? "auto"
+                                : String(form.rank ?? hardwarePreset.rank)
+                            }
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setForm((current) =>
+                                value === "auto"
+                                  ? applyHardwarePreset(current, hardwarePreset)
+                                  : {
+                                      ...(current.autoSettings
+                                        ? applyHardwarePreset(
+                                            current,
+                                            hardwarePreset,
+                                          )
+                                        : current),
+                                      autoSettings: false,
+                                      rank: Number(value),
+                                    },
+                              );
+                            }}
+                          >
+                            <option value="auto">
+                              Auto · {hardwarePreset.rank}
+                            </option>
+                            {!form.autoSettings &&
+                              form.rank !== null &&
+                              !guidanceRankChoices.includes(form.rank) && (
+                                <option value={form.rank}>
+                                  Current · {form.rank}
+                                  {form.rank > hardwarePreset.rank
+                                    ? " (above fit)"
+                                    : ""}
+                                </option>
+                              )}
+                            {guidanceRankChoices.map((value) => (
+                              <option key={value} value={value}>
+                                {value}
+                              </option>
+                            ))}
+                          </select>
+                          <small>Adapter capacity and memory use.</small>
+                        </label>
+                        <label className="field">
+                          <span>Learning rate</span>
+                          <select
+                            value={rateSelection}
+                            onChange={(event) => selectRate(event.target.value)}
+                          >
+                            <option value="backend">
+                              Backend default · 1.00e-5
+                            </option>
+                            {rateSelection === "previous" && (
+                              <option value="previous">
+                                Previous setting ·{" "}
+                                {form.learningRate?.toExponential(2)}
+                              </option>
+                            )}
+                            {rateOptions.map((option) => (
+                              <option key={option.pace} value={option.pace}>
+                                {option.label} · {option.rate.toExponential(2)}
+                              </option>
+                            ))}
+                          </select>
+                          <small>
+                            Sets the update pace. Rate alone does not affect
+                            memory.
+                          </small>
+                        </label>
+                      </div>
+                      {datasetSummaryError && (
+                        <p className="guidance-error">{datasetSummaryError}</p>
+                      )}
+                      <p className="guidance-note">
+                        Auto fits memory sensitive settings to this device.
+                        Manual batch and rank choices use the measured fit as
+                        their upper limit.
+                      </p>
+                      <button
+                        type="button"
+                        className="quiet-button guidance-done"
+                        onClick={() => setGuidanceOpen(false)}
+                      >
+                        Done
+                      </button>
+                    </section>
+                  </div>,
+                  document.body,
+                )}
 
               {advanced && (
                 <div className="advanced-panel">
@@ -1612,16 +1995,32 @@ export function App() {
                         }
                       />
                       {needsFineTune && (
-                        <NumberField
-                          label="Fine-tune learning rate"
-                          value={form.learningRate}
-                          min={0}
-                          step="any"
-                          placeholder="Backend default"
-                          onChange={(learningRate) =>
-                            setForm({ ...form, learningRate })
-                          }
-                        />
+                        <label className="field">
+                          <span>Fine-tune learning rate</span>
+                          <select
+                            value={rateSelection}
+                            onChange={(event) => selectRate(event.target.value)}
+                          >
+                            <option value="backend">
+                              Backend default · 1.00e-5
+                            </option>
+                            {rateSelection === "previous" && (
+                              <option value="previous">
+                                Previous setting ·{" "}
+                                {form.learningRate?.toExponential(2)}
+                              </option>
+                            )}
+                            {rateOptions.map((option) => (
+                              <option key={option.pace} value={option.pace}>
+                                {option.label} · {option.rate.toExponential(2)}
+                              </option>
+                            ))}
+                          </select>
+                          <small>
+                            Adaptive update pace; memory is fitted by batch,
+                            rank and context.
+                          </small>
+                        </label>
                       )}
                       {needsAlignment && (
                         <NumberField
@@ -2087,6 +2486,22 @@ export function App() {
                         : "Resume training"}
                     </button>
                   )}
+                  {(active.status === "running" ||
+                    active.status === "paused") && (
+                    <button
+                      type="button"
+                      className="quiet-button"
+                      disabled={Boolean(sessionControl)}
+                      onClick={() => void saveCheckpoint(active.id)}
+                    >
+                      <Icon
+                        name={sessionControl === "saving" ? "loader" : "save"}
+                      />
+                      {sessionControl === "saving"
+                        ? "Requesting…"
+                        : "Save checkpoint"}
+                    </button>
+                  )}
                   <button
                     className="danger-button"
                     disabled={
@@ -2404,7 +2819,45 @@ export function App() {
                       <strong>{selected.adjustment}</strong>
                     </div>
                   )}
+                  {selected.checkpointStatus && (
+                    <div>
+                      <span>Latest checkpoint</span>
+                      <strong>
+                        {selected.checkpointStatus === "requested"
+                          ? selected.status === "paused"
+                            ? "Requested; resume training to finish saving"
+                            : "Waiting for the next safe training step"
+                          : selected.checkpointStatus === "failed"
+                            ? "Save failed; check the live output"
+                            : `Adapter saved ${friendlyTime(selected.checkpointSavedAt || "")}`}
+                      </strong>
+                    </div>
+                  )}
+                  {selected.checkpointModelPath && (
+                    <div>
+                      <span>Reusable model</span>
+                      <strong>Latest checkpoint model is ready</strong>
+                    </div>
+                  )}
                 </div>
+                {selected.checkpointModelPath &&
+                  selected.status !== "completed" && (
+                    <div className="session-artifacts">
+                      <span>Saved adapter and reusable model</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((current) => ({
+                            ...current,
+                            modelSource: "custom",
+                            customModelFolder: selected.checkpointModelPath!,
+                          }))
+                        }
+                      >
+                        Use saved model
+                      </button>
+                    </div>
+                  )}
                 {selected.error && (
                   <div className="session-error">
                     <Icon name="alert-triangle" />
@@ -2821,48 +3274,23 @@ export function App() {
                   </b>
                   <small>
                     {backendChecking || backend === null
-                      ? "Verifying the selected local executable"
+                      ? "Verifying the managed osAi CLI"
                       : backend.message}
                   </small>
                 </div>
               </div>
-              <label className="field">
-                <span>Executable</span>
-                <div className="input-button">
-                  <input
-                    value={preferences.backendExecutable}
-                    placeholder="osai from PATH"
-                    onChange={(event) =>
-                      setPreferences({
-                        ...preferences,
-                        backendExecutable: event.target.value,
-                      })
-                    }
-                  />
-                  <button
-                    className="icon-button"
-                    onClick={async () => {
-                      const value = await window.osai.chooseBackend();
-                      if (value)
-                        await saveAndCheckBackend({
-                          ...preferences,
-                          backendExecutable: value,
-                        });
-                    }}
-                    aria-label="Choose osAi executable"
-                  >
-                    <Icon name="folder" />
-                  </button>
-                </div>
-              </label>
+              <p className="field-hint">
+                osAi downloads the CLI from its main branch and builds it for
+                this computer.
+              </p>
               <div className="button-row">
                 <button
                   className="quiet-button"
                   disabled={backendChecking || backendInstallBusy}
-                  onClick={() => void saveAndCheckBackend(preferences)}
+                  onClick={() => void refreshBackend()}
                 >
                   <Icon name={backendChecking ? "loader" : "check"} />
-                  {backendChecking ? "Checking…" : "Save and check"}
+                  {backendChecking ? "Checking…" : "Check installation"}
                 </button>
                 <button
                   className="quiet-button"
@@ -2870,7 +3298,7 @@ export function App() {
                   onClick={() => void downloadBackend()}
                 >
                   <Icon name={backendInstallBusy ? "loader" : "download"} />
-                  {backendInstallBusy ? "Installing…" : "Install locally"}
+                  {backendInstallBusy ? "Installing…" : "Install or repair"}
                 </button>
               </div>
             </section>

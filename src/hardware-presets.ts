@@ -52,6 +52,22 @@ const modelBytes = {
   },
 } as const;
 
+export function estimatedModelBytes(
+  hardware: HardwareInfo,
+  engine: TrainingRequest["engine"],
+  tier: TrainingRequest["tier"],
+  modelVersion: TrainingRequest["modelVersion"],
+) {
+  const runtime =
+    engine === "mlx" ||
+    (engine === "auto" &&
+      hardware.platform === "darwin" &&
+      hardware.architecture === "arm64")
+      ? "mlx"
+      : "llama.cpp";
+  return modelBytes[modelVersion][runtime][tier];
+}
+
 export type HardwarePreset = {
   profile: "compact" | "balanced" | "performance" | "maximum";
   batchSize: number;

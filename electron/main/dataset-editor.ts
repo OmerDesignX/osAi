@@ -163,14 +163,20 @@ function splitForFilename(name: string): SourceFile["split"] | null {
   return null;
 }
 
-async function sourceFiles(sourceValue: string): Promise<SourceFile[]> {
+async function sourceFiles(
+  sourceValue: string,
+  includeParquet = false,
+): Promise<SourceFile[]> {
   if (!sourceValue || !path.isAbsolute(sourceValue))
     throw new Error("Dataset source must be an absolute file or folder path");
   const source = path.resolve(sourceValue);
   const details = await fs.stat(source).catch(() => null);
   if (!details) throw new Error("Dataset source does not exist");
   if (details.isFile()) {
-    if (!DATA_EXTENSIONS.has(path.extname(source).toLowerCase()))
+    if (
+      !DATA_EXTENSIONS.has(path.extname(source).toLowerCase()) &&
+      !(includeParquet && path.extname(source).toLowerCase() === ".parquet")
+    )
       throw new Error("Choose a JSON, JSONL, or NDJSON dataset file");
     return [{ file: source, split: "train" }];
   }
@@ -191,7 +197,9 @@ async function sourceFiles(sourceValue: string): Promise<SourceFile[]> {
           pending.push(child);
       } else if (
         entry.isFile() &&
-        DATA_EXTENSIONS.has(path.extname(entry.name).toLowerCase()) &&
+        (DATA_EXTENSIONS.has(path.extname(entry.name).toLowerCase()) ||
+          (includeParquet &&
+            path.extname(entry.name).toLowerCase() === ".parquet")) &&
         !METADATA_FILES.has(entry.name.toLowerCase())
       )
         entries.push(child);
@@ -206,6 +214,17 @@ async function sourceFiles(sourceValue: string): Promise<SourceFile[]> {
     file,
     split: splitForFilename(file) || "train",
   }));
+}
+
+export async function datasetTrainingSummary(source: string) {
+  const files = await sourceFiles(source, true);
+  const sizes = await Promise.all(
+    files.map(async ({ file }) => (await fs.stat(file)).size),
+  );
+  return {
+    fileCount: files.length,
+    totalBytes: sizes.reduce((total, size) => total + size, 0),
+  };
 }
 
 function recordsFromDocument(

@@ -1169,6 +1169,7 @@ export class SessionService {
       stopPath: path.join(directory, "stop.request"),
       pausePath: path.join(directory, "pause.request"),
       resumePath: path.join(directory, "resume.request"),
+      checkpointRequestPath: path.join(directory, "checkpoint.request"),
       stage: input.stage,
       iterations: input.iterations,
       alignmentIterations: input.alignmentIterations,
@@ -1398,6 +1399,27 @@ export class SessionService {
 
   async resume(id: string) {
     return this.control(id, "resume");
+  }
+
+  async checkpoint(id: string) {
+    const state = await this.find(id);
+    if (state.status !== "running" && state.status !== "paused")
+      throw new Error("Start or resume training before saving a checkpoint");
+    const job = JSON.parse(
+      await fs.readFile(path.join(state.sessionDirectory, "job.json"), "utf8"),
+    ) as WorkerJob;
+    const request = path.join(state.sessionDirectory, "checkpoint.request");
+    if (
+      !job.checkpointRequestPath ||
+      path.resolve(job.checkpointRequestPath) !== request
+    )
+      throw new Error(
+        "Checkpoint saving is available for sessions started by this version of osAi",
+      );
+    const pending = `${request}.${process.pid}.pending`;
+    await fs.writeFile(pending, `${randomUUID()}\n`, { mode: 0o600 });
+    await fs.rename(pending, request);
+    return { ...state, checkpointStatus: "requested" as const };
   }
 
   async log(id: string) {

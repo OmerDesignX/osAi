@@ -69,7 +69,7 @@ The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SD
 8. Choose **Save sessions in** when a different location is needed. The default is `~/osAi/sessions` in the user's home folder.
 9. Press **Start training**.
 
-While a run is active, **Start training** becomes **Pause training** and **Stop training**. A paused run can be resumed from the same controls. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. Individual split shards, MLX files, and V2 GGUF projectors are downloaded from the selected V1/V2 catalog and checked against its published SHA-256 list. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
+While a run is active, **Start training** becomes **Pause training**, **Save checkpoint**, and **Stop training**. A paused run can be resumed from the same controls. **Save checkpoint** writes the current adapter at the next safe optimizer step; a paused run finishes its save after resuming. The session shows when the latest adapter and reusable model are ready. Automatic saves replace the same latest checkpoint rather than collecting numbered copies. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. Individual split shards, MLX files, and V2 GGUF projectors are downloaded from the selected V1/V2 catalog and checked against its published SHA-256 list. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
 
 On the first launch after upgrading, complete V1 downloads in `~/osAi/models/MLX` or `~/osAi/models/GGUF` are made available under `~/osAi/models/V1` using same-volume hard links. This does not download or store another copy of the model, and the original paths remain valid for older sessions. The app never overwrites an existing V1 folder, leaves incomplete downloads untouched, and waits until active training has stopped before doing this. A legacy model remains usable if promotion is unavailable on its filesystem.
 
@@ -233,7 +233,8 @@ In the App, press **Custom model**, press the **Model folder** button, and selec
 Each run receives its own local date-and-time folder. The session view shows progress, the current phase, and live backend output.
 
 - Press a session tab to inspect that run.
-- Press **Stop** to request a clean stop after the current backend operation.
+- Press **Save checkpoint** and wait for its saved status before stopping if you need the latest weights.
+- Press **Stop** to end the worker; updates since the last saved checkpoint may be lost.
 - Press **Show files** to reveal the selected session.
 - Press **Open sessions** or the top-bar **Sessions** button to open the complete sessions folder.
 - Closing the App does not stop training. The detached local worker continues until completion or until **Stop** is pressed.
@@ -273,19 +274,23 @@ For GGUF, the bundle keeps the original file or split shards and any multimodal 
 | **Optimizer**                             | Select Auto, SGD, or AdamW                                                  |
 | **Generate fresh answers locally**        | Enable local live rollout generation for alignment                          |
 | **Fit settings to this hardware**         | Apply RAM-aware engine and training settings                                |
+| **Guidance**                              | Choose epochs, fitted batch and rank, and an adaptive learning-rate pace    |
 | **Name this session**                     | Replace the automatic run name                                              |
 | **Advanced**                              | Reveal optimization, LoRA, rollout, evaluation, and runtime controls        |
 | **Start training**                        | Validate the selections and start a detached local run                      |
+| **Save checkpoint**                       | Save one replaceable adapter and reusable model at the next safe step       |
 | **Stop**                                  | Stop the selected active run cleanly                                        |
 | **Show files / Open sessions**            | Open local output folders                                                   |
 
 ## Settings
 
-Press **Settings** to choose **Gunmetal + blue**, **Blue dark**, or **Blue light**; install or select the osAi backend; or manage App updates.
+Press **Settings** to choose **Gunmetal + blue**, **Blue dark**, or **Blue light**; install or repair the managed osAi CLI; or manage App updates.
 
-App-update checks are available in **Settings**. Press **Install locally** under **osAi backend** to download and reinstall the CLI. Enable **Install updates automatically** to close osAi and open a verified DMG, EXE, or DEB when an App update is ready.
+App-update checks are available in **Settings**. Press **Install or repair** under **osAi backend** to download and reinstall the CLI from its main branch. Enable **Install updates automatically** to close osAi and open a verified DMG, EXE, or DEB when an App update is ready.
 
-Backend setup downloads the CLI source and Python dependencies. App updates and official model downloads also use the network. Training data and model outputs stay local.
+Backend setup downloads the CLI source and Python dependencies, then compiles llama.cpp for the current computer. Existing managed installs are refreshed when the app's CLI revision changes. App updates and official model downloads also use the network. Training data and model outputs stay local.
+
+**Guidance** provides conservative learning-rate choices adjusted for the selected dataset size, model, epochs, and fitted batch and rank. Learning rate changes the update pace; batch, rank, and context determine most training memory use. Dataset size affects the rate suggestion, not the memory fit.
 
 ## Build release installers
 

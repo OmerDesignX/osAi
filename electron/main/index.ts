@@ -17,7 +17,12 @@ import { readAutoDevices, runAutoBenchmark } from "./auto-benchmark.js";
 import { readPreferences, writePreferences } from "./preferences.js";
 import { SessionService } from "./session-service.js";
 import { stopSessionTrainers } from "./session-processes.js";
-import { inspectDataset, saveDataset } from "./dataset-editor.js";
+import {
+  datasetTrainingSummary,
+  inspectDataset,
+  saveDataset,
+} from "./dataset-editor.js";
+import { modelTrainingSummary } from "./model-summary.js";
 import { AppUpdateService } from "./updater.js";
 import { migrateLegacyV1Models } from "./model-migration.js";
 
@@ -254,20 +259,17 @@ function registerIpc() {
     });
     return result.canceled ? "" : result.filePaths[0] || "";
   });
-  ipcMain.handle("dialog:choose-backend", async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      title: "Choose the osAi executable",
-      properties: ["openFile"],
-      filters:
-        process.platform === "win32"
-          ? [{ name: "Applications", extensions: ["exe"] }]
-          : [{ name: "Executable", extensions: ["*"] }],
-    });
-    return result.canceled ? "" : result.filePaths[0] || "";
-  });
   ipcMain.handle("dataset:inspect", (_event, source: unknown) => {
     if (typeof source !== "string") throw new Error("Invalid dataset source");
     return inspectDataset(source);
+  });
+  ipcMain.handle("dataset:training-summary", (_event, source: unknown) => {
+    if (typeof source !== "string") throw new Error("Invalid dataset source");
+    return datasetTrainingSummary(source);
+  });
+  ipcMain.handle("model:training-summary", (_event, source: unknown) => {
+    if (typeof source !== "string") throw new Error("Invalid model folder");
+    return modelTrainingSummary(source);
   });
   ipcMain.handle("dataset:save", (_event, value: unknown) =>
     saveDataset(value as Parameters<typeof saveDataset>[0]),
@@ -308,6 +310,12 @@ function registerIpc() {
     );
   });
   ipcMain.handle("training:start", async (_event, value: unknown) => {
+    const status = await sessionService.backendStatus();
+    if (
+      !status.available ||
+      !(await backendInstaller.isCurrent(status.executable))
+    )
+      throw new Error("Install the current osAi CLI from main before training");
     await migrateModelsIfIdle();
     return sessionService.start(value as TrainingRequest);
   });
@@ -319,6 +327,10 @@ function registerIpc() {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.resume(id);
   });
+  ipcMain.handle("training:checkpoint", (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Invalid training session");
+    return sessionService.checkpoint(id);
+  });
   ipcMain.handle("training:stop", (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.stop(id);
@@ -327,6 +339,14 @@ function registerIpc() {
     "training:restart",
     async (_event, id: unknown, value: unknown) => {
       if (typeof id !== "string") throw new Error("Invalid training session");
+      const status = await sessionService.backendStatus();
+      if (
+        !status.available ||
+        !(await backendInstaller.isCurrent(status.executable))
+      )
+        throw new Error(
+          "Install the current osAi CLI from main before training",
+        );
       await migrateModelsIfIdle();
       return sessionService.restart(
         id,

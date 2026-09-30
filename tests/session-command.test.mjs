@@ -375,6 +375,73 @@ test("moves finished sessions to Trash and protects active sessions", async () =
   }
 });
 
+test("requests one replaceable checkpoint for a running session", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "osai-checkpoint-session-"),
+  );
+  const directory = path.join(root, "active");
+  const id = "88888888-8888-4888-8888-888888888888";
+  const requestPath = path.join(directory, "checkpoint.request");
+  await fs.mkdir(directory);
+  await fs.writeFile(
+    path.join(directory, "state.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      name: "active",
+      status: "running",
+      phase: "fine-tuning",
+      progress: 20,
+      indeterminate: false,
+      message: "Training",
+      createdAt: new Date().toISOString(),
+      workerPid: process.pid,
+      sessionDirectory: directory,
+      logPath: path.join(directory, "training.log"),
+      command: "osai train",
+      request: { ...base, sessionsRoot: root },
+    }),
+  );
+  await fs.writeFile(
+    path.join(directory, "job.json"),
+    JSON.stringify({ checkpointRequestPath: requestPath }),
+  );
+  const service = new SessionService(root, "unused-worker", async () => ({
+    version: 1,
+    theme: "dark",
+    backendExecutable: "",
+    autoUpdateEnabled: false,
+    sessionsRoot: root,
+    sessionRoots: [],
+  }));
+  try {
+    assert.equal((await service.checkpoint(id)).checkpointStatus, "requested");
+    const first = (await fs.readFile(requestPath, "utf8")).trim();
+    assert.match(first, /^[0-9a-f-]{36}$/);
+    await service.checkpoint(id);
+    const second = (await fs.readFile(requestPath, "utf8")).trim();
+    assert.notEqual(second, first);
+    assert.deepEqual(
+      (await fs.readdir(directory)).filter((name) =>
+        name.startsWith("checkpoint.request"),
+      ),
+      ["checkpoint.request"],
+    );
+    await fs.writeFile(
+      path.join(directory, "job.json"),
+      JSON.stringify({
+        checkpointRequestPath: path.join(root, "outside.request"),
+      }),
+    );
+    await assert.rejects(
+      service.checkpoint(id),
+      /Checkpoint saving is available/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("restart clears the previous pipeline before launching saved settings", async () => {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "osai-restart-session-"),

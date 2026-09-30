@@ -75,6 +75,80 @@ test("detached training continues after its launcher exits", async () => {
   }
 });
 
+test("a completed checkpoint request remains saved after worker polling", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "osai-worker-checkpoint-"),
+  );
+  const worker = path.resolve("dist-electron/main/training-worker.js");
+  const backend = path.resolve("tests/fixtures/fake-backend.mjs");
+  const statePath = path.join(root, "state.json");
+  const jobPath = path.join(root, "job.json");
+  const checkpointRequestPath = path.join(root, "checkpoint.request");
+  const id = "99999999-9999-4999-8999-999999999999";
+  const now = new Date().toISOString();
+  await fs.writeFile(checkpointRequestPath, "save-now\n");
+  await fs.writeFile(
+    statePath,
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      name: "checkpoint-test",
+      status: "queued",
+      phase: "preparing",
+      progress: 0,
+      indeterminate: true,
+      message: "queued",
+      createdAt: now,
+      sessionDirectory: root,
+      logPath: path.join(root, "training.log"),
+      command: "node fake-backend.mjs --checkpoint",
+    }),
+  );
+  await fs.writeFile(
+    jobPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      executable: process.execPath,
+      args: [backend, "--checkpoint"],
+      sessionDirectory: root,
+      statePath,
+      logPath: path.join(root, "training.log"),
+      stopPath: path.join(root, "stop.request"),
+      checkpointRequestPath,
+      stage: "fine-tuning",
+      iterations: 1,
+      alignmentIterations: 1,
+      createdAt: now,
+    }),
+  );
+  const processHandle = spawn(process.execPath, [worker, jobPath], {
+    stdio: "ignore",
+  });
+  try {
+    const saved = await waitFor(
+      statePath,
+      (value) => value.checkpointStatus === "saved",
+    );
+    assert.match(
+      saved.checkpointPath,
+      /[\\/]outputs[\\/]checkpoint[\\/]adapter[\\/]last\.gguf$/,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(
+      JSON.parse(await fs.readFile(statePath, "utf8")).checkpointStatus,
+      "saved",
+    );
+    assert.equal(
+      await new Promise((resolve) => processHandle.once("close", resolve)),
+      0,
+    );
+  } finally {
+    processHandle.kill("SIGKILL");
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("MLX table iterations advance against the announced optimizer steps", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-mlx-"));
   const worker = path.resolve("dist-electron/main/training-worker.js");
