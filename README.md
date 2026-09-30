@@ -274,7 +274,7 @@ For GGUF, the bundle keeps the original file or split shards and any multimodal 
 | **Optimizer**                             | Select Auto, SGD, or AdamW                                                  |
 | **Generate fresh answers locally**        | Enable local live rollout generation for alignment                          |
 | **Fit settings to this hardware**         | Apply RAM-aware engine and training settings                                |
-| **Guidance**                              | Choose epochs, fitted batch and rank, and an adaptive learning-rate pace    |
+| **Quick Settings**                        | Choose epochs, fitted batch and rank, and an adaptive learning-rate pace    |
 | **Name this session**                     | Replace the automatic run name                                              |
 | **Advanced**                              | Reveal optimization, LoRA, rollout, evaluation, and runtime controls        |
 | **Start training**                        | Validate the selections and start a detached local run                      |
@@ -290,7 +290,7 @@ App-update checks are available in **Settings**. Press **Install or repair** und
 
 Backend setup downloads the CLI source and Python dependencies, then compiles llama.cpp for the current computer. Existing managed installs are refreshed when the app's CLI revision changes. App updates and official model downloads also use the network. Training data and model outputs stay local.
 
-**Guidance** provides conservative learning-rate choices adjusted for the selected dataset size, model, epochs, and fitted batch and rank. Learning rate changes the update pace; batch, rank, and context determine most training memory use. Dataset size affects the rate suggestion, not the memory fit.
+**Quick Settings** provides conservative learning-rate choices adjusted for the selected dataset size, model, epochs, and fitted batch and rank. Learning rate changes the update pace; batch, rank, and context determine most training memory use. Dataset size affects the rate suggestion, not the memory fit.
 
 ## Build release installers
 

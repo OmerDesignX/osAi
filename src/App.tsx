@@ -368,6 +368,8 @@ export function App() {
   const [dataEditorOpen, setDataEditorOpen] = useState(false);
   const [dataEditorActive, setDataEditorActive] = useState(false);
   const [dataEditorSource, setDataEditorSource] = useState("");
+  const appRootRef = useRef<HTMLDivElement | null>(null);
+  const quickSettingsRef = useRef<HTMLElement | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
   const followLogRef = useRef(true);
   const selectionClearedRef = useRef(false);
@@ -515,6 +517,7 @@ export function App() {
 
   useEffect(() => {
     if (!guidanceOpen) return;
+    quickSettingsRef.current?.querySelector("select")?.focus();
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape") setGuidanceOpen(false);
     };
@@ -1143,6 +1146,7 @@ export function App() {
 
   return (
     <div
+      ref={appRootRef}
       className={
         "app " +
         preferences.theme +
@@ -1638,7 +1642,8 @@ export function App() {
                     <span>
                       <b>Fit settings to this hardware</b>
                       <small>
-                        Apply recommended values. Turn off to fine-tune them.
+                        Automatically fit this device. Turn off for manual
+                        control.
                       </small>
                     </span>
                   </label>
@@ -1646,11 +1651,11 @@ export function App() {
                     {needsFineTune && (
                       <button
                         type="button"
-                        className="quiet-button compact-button"
+                        className="quiet-button compact-button quick-settings-trigger"
                         onClick={() => setGuidanceOpen(true)}
                         aria-haspopup="dialog"
                       >
-                        <Icon name="sliders" /> Guidance
+                        <Icon name="sliders" /> Quick Settings
                       </button>
                     )}
                     <button
@@ -1667,34 +1672,36 @@ export function App() {
               </section>
 
               {guidanceOpen &&
+                appRootRef.current &&
                 createPortal(
                   <div
-                    className="guidance-backdrop"
+                    className="app-dialog-backdrop guidance-backdrop"
                     onPointerDown={(event) => {
                       if (event.target === event.currentTarget)
                         setGuidanceOpen(false);
                     }}
                   >
                     <section
-                      className="guidance-card"
+                      ref={quickSettingsRef}
+                      className="app-dialog guidance-card"
                       role="dialog"
                       aria-modal="true"
                       aria-labelledby="guidance-title"
                     >
-                      <div className="guidance-header">
+                      <header className="guidance-header">
                         <div>
-                          <h2 id="guidance-title">LoRA guidance</h2>
-                          <p>Core settings for this training run.</p>
+                          <h2 id="guidance-title">Quick Settings</h2>
+                          <p>Core LoRA settings for this training run.</p>
                         </div>
                         <button
                           type="button"
-                          className="icon-button"
+                          className="dialog-close"
                           onClick={() => setGuidanceOpen(false)}
-                          aria-label="Close guidance"
+                          aria-label="Close Quick Settings"
                         >
                           <Icon name="x" />
                         </button>
-                      </div>
+                      </header>
                       <div className="guidance-context">
                         <span>
                           {form.modelSource === "custom"
@@ -1869,16 +1876,18 @@ export function App() {
                         Manual batch and rank choices use the measured fit as
                         their upper limit.
                       </p>
-                      <button
-                        type="button"
-                        className="quiet-button guidance-done"
-                        onClick={() => setGuidanceOpen(false)}
-                      >
-                        Done
-                      </button>
+                      <footer className="guidance-footer">
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => setGuidanceOpen(false)}
+                        >
+                          Done
+                        </button>
+                      </footer>
                     </section>
                   </div>,
-                  document.body,
+                  appRootRef.current,
                 )}
 
               {advanced && (

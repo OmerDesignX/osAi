@@ -782,37 +782,54 @@ input::placeholder {
 
 .settings-strip {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
 }
 
 .settings-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.guidance-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
   display: grid;
-  place-items: center;
-  padding: 18px;
-  background: rgb(0 0 0 / 58%);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
 }
 
-.guidance-card {
-  width: min(100%, 420px);
+.settings-actions > button {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.settings-actions > button:only-child {
+  grid-column: 1 / -1;
+}
+
+.quick-settings-trigger {
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--control-fill));
+}
+
+.quick-settings-trigger:hover,
+.quick-settings-trigger:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 16%, var(--control-fill));
+}
+
+.app-dialog-backdrop.guidance-backdrop {
+  z-index: 300;
+}
+
+.app-dialog.guidance-card {
+  width: min(520px, calc(100vw - 36px));
   max-height: min(720px, calc(100vh - 36px));
   overflow-y: auto;
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--panel);
-  box-shadow: 0 20px 70px rgb(0 0 0 / 28%);
+  color: var(--text, #f0f1f1);
+  background: var(--panel2, #303536);
 }
 
 .guidance-header {
@@ -822,21 +839,11 @@ input::placeholder {
   gap: 12px;
 }
 
-.guidance-header h2 {
-  font-size: 20px;
-}
-.guidance-header p,
-.guidance-note {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
 .guidance-context {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 13px 0;
-  margin: 12px 0;
+  padding: 12px 0;
   border-block: 1px solid var(--line);
 }
 .guidance-context span {
@@ -858,8 +865,11 @@ input::placeholder {
   color: var(--muted);
   line-height: 1.4;
 }
-.guidance-note {
-  margin-top: 14px;
+.app-dialog .guidance-note {
+  margin-top: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 .guidance-error {
   margin-top: 10px;
@@ -867,9 +877,9 @@ input::placeholder {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.guidance-done {
-  width: 100%;
-  margin-top: 14px;
+.guidance-footer {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 @media (max-width: 440px) {
