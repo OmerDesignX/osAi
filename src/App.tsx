@@ -317,10 +317,12 @@ export function App() {
   const [guidanceOpen, setGuidanceOpen] = useState(false);
   const [learningPace, setLearningPace] = useState<LearningPace | null>(null);
   const [datasetSummary, setDatasetSummary] = useState<{
+    source: string;
     fileCount: number;
     totalBytes: number;
   } | null>(null);
   const [datasetSummaryError, setDatasetSummaryError] = useState("");
+  const [datasetSummaryBusy, setDatasetSummaryBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -400,10 +402,17 @@ export function App() {
     hardwarePreset.rank,
     [1, 2, 4, 8, 16, 32],
   );
+  const datasetSource = form.fineTuneData.trim();
+  const currentDatasetSummary =
+    datasetSummary?.source === datasetSource ? datasetSummary : null;
+  const datasetSummaryPending = Boolean(
+    datasetSource &&
+    (datasetSummaryBusy || (!currentDatasetSummary && !datasetSummaryError)),
+  );
   const rateOptions = useMemo(
     () =>
       learningRateOptions({
-        datasetBytes: datasetSummary?.totalBytes ?? null,
+        datasetBytes: currentDatasetSummary?.totalBytes ?? null,
         modelBytes:
           form.modelSource === "custom"
             ? ((form.autoSettings ? benchmarkModelBytes : null) ??
@@ -422,7 +431,7 @@ export function App() {
         epochs: form.iterations,
       }),
     [
-      datasetSummary?.totalBytes,
+      currentDatasetSummary?.totalBytes,
       benchmarkModelBytes,
       customModelBytes,
       form.modelSource,
@@ -440,7 +449,6 @@ export function App() {
   );
   const rateSelection =
     learningPace ?? (form.learningRate === null ? "backend" : "previous");
-  const needsGuidanceMetadata = guidanceOpen || learningPace !== null;
   const selectRate = (value: string) => {
     const selectedRate = rateOptions.find((option) => option.pace === value);
     setLearningPace(selectedRate?.pace ?? null);
@@ -451,20 +459,20 @@ export function App() {
   };
 
   useEffect(() => {
-    if (!needsGuidanceMetadata) return;
     setDatasetSummary(null);
-    if (!form.fineTuneData.trim()) {
-      setDatasetSummary(null);
-      setDatasetSummaryError("");
+    setDatasetSummaryError("");
+    if (!datasetSource) {
+      setDatasetSummaryBusy(false);
       return;
     }
+    setDatasetSummaryBusy(true);
     let current = true;
     const timer = window.setTimeout(() => {
       void window.osai
-        .datasetTrainingSummary(form.fineTuneData.trim())
+        .datasetTrainingSummary(datasetSource)
         .then((summary) => {
           if (current) {
-            setDatasetSummary(summary);
+            setDatasetSummary({ ...summary, source: datasetSource });
             setDatasetSummaryError("");
           }
         })
@@ -473,16 +481,19 @@ export function App() {
             setDatasetSummary(null);
             setDatasetSummaryError(readableError(error));
           }
+        })
+        .finally(() => {
+          if (current) setDatasetSummaryBusy(false);
         });
     }, 300);
     return () => {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [needsGuidanceMetadata, form.fineTuneData]);
+  }, [datasetSource]);
 
   useEffect(() => {
-    if (form.modelSource !== "custom" || !needsGuidanceMetadata) return;
+    if (form.modelSource !== "custom") return;
     setCustomModelBytes(null);
     if (!form.customModelFolder.trim()) return;
     let current = true;
@@ -500,10 +511,10 @@ export function App() {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [needsGuidanceMetadata, form.modelSource, form.customModelFolder]);
+  }, [form.modelSource, form.customModelFolder]);
 
   useEffect(() => {
-    if (!learningPace) return;
+    if (!learningPace || datasetSummaryPending) return;
     const rate = rateOptions.find(
       (option) => option.pace === learningPace,
     )?.rate;
@@ -513,7 +524,7 @@ export function App() {
           ? current
           : { ...current, learningRate: rate },
       );
-  }, [learningPace, rateOptions]);
+  }, [learningPace, rateOptions, datasetSummaryPending]);
 
   useEffect(() => {
     if (!guidanceOpen) return;
@@ -1709,11 +1720,13 @@ export function App() {
                             : `osCode ${form.modelVersion.toUpperCase()} · ${form.tier}`}
                         </span>
                         <span>
-                          {datasetSummary
-                            ? `${datasetSummary.fileCount} file${datasetSummary.fileCount === 1 ? "" : "s"} · ${(datasetSummary.totalBytes / 1024 ** 2).toFixed(1)} MiB`
-                            : datasetSummaryError
-                              ? "Dataset unavailable"
-                              : "Select a dataset for tailored rates"}
+                          {currentDatasetSummary
+                            ? `${currentDatasetSummary.fileCount} file${currentDatasetSummary.fileCount === 1 ? "" : "s"} · ${(currentDatasetSummary.totalBytes / 1024 ** 2).toFixed(1)} MiB`
+                            : datasetSummaryPending
+                              ? "Reading dataset size…"
+                              : datasetSummaryError
+                                ? "Dataset unavailable"
+                                : "Select a dataset for tailored rates"}
                         </span>
                         <span>
                           {benchmarkBusy
@@ -1846,6 +1859,7 @@ export function App() {
                           <select
                             value={rateSelection}
                             onChange={(event) => selectRate(event.target.value)}
+                            disabled={datasetSummaryPending}
                           >
                             <option value="backend">
                               Backend default · 1.00e-5
@@ -1863,8 +1877,9 @@ export function App() {
                             ))}
                           </select>
                           <small>
-                            Sets the update pace. Rate alone does not affect
-                            memory.
+                            {datasetSummaryPending
+                              ? "Reading the dataset to tailor learning rates."
+                              : "Sets the update pace. Rate alone does not affect memory."}
                           </small>
                         </label>
                       </div>
@@ -1872,9 +1887,9 @@ export function App() {
                         <p className="guidance-error">{datasetSummaryError}</p>
                       )}
                       <p className="guidance-note">
-                        Auto fits memory sensitive settings to this device.
-                        Manual batch and rank choices use the measured fit as
-                        their upper limit.
+                        Learning rates use the selected data, model and fitted
+                        settings, with conservative limits. Batch, rank and
+                        context control memory use.
                       </p>
                       <footer className="guidance-footer">
                         <button
@@ -2009,6 +2024,7 @@ export function App() {
                           <select
                             value={rateSelection}
                             onChange={(event) => selectRate(event.target.value)}
+                            disabled={datasetSummaryPending}
                           >
                             <option value="backend">
                               Backend default · 1.00e-5
@@ -2026,8 +2042,9 @@ export function App() {
                             ))}
                           </select>
                           <small>
-                            Adaptive update pace; memory is fitted by batch,
-                            rank and context.
+                            {datasetSummaryPending
+                              ? "Reading the dataset to tailor learning rates."
+                              : "Adaptive update pace; memory is fitted by batch, rank and context."}
                           </small>
                         </label>
                       )}
