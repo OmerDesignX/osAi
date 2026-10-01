@@ -218,12 +218,16 @@ async function sourceFiles(
 
 export async function datasetTrainingSummary(source: string) {
   const files = await sourceFiles(source, true);
-  const sizes = await Promise.all(
-    files.map(async ({ file }) => (await fs.stat(file)).size),
+  const details = await Promise.all(
+    files.map(async ({ file }) => ({ file, stats: await fs.stat(file) })),
   );
+  const signature = createHash("sha256");
+  for (const { file, stats } of details)
+    signature.update(JSON.stringify([file, stats.size, stats.mtimeMs]) + "\n");
   return {
     fileCount: files.length,
-    totalBytes: sizes.reduce((total, size) => total + size, 0),
+    totalBytes: details.reduce((total, item) => total + item.stats.size, 0),
+    signature: signature.digest("hex"),
   };
 }
 

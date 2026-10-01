@@ -602,6 +602,49 @@ p {
   font-weight: 600;
 }
 
+.section-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.workflow-step {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--control-fill);
+  color: var(--accent);
+  font:
+    600 11px "Manrope",
+    system-ui,
+    sans-serif;
+}
+
+.calibration-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.calibration-status.ready {
+  color: var(--success);
+}
+
+.calibration-status .icon {
+  flex: 0 0 auto;
+}
+
 .section-heading p {
   color: var(--muted);
   font-size: 12px;

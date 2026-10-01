@@ -72,6 +72,21 @@ export function learningRateOptions(input: {
   }));
 }
 
+export function calibratedLearningRateOptions(
+  measuredRate: number,
+): LearningRateOption[] {
+  const choices: Array<[LearningPace, string, number]> = [
+    ["very-gentle", "Very gentle", 0.25],
+    ["gentle", "Gentle", 0.5],
+    ["balanced", "Measured fit", 1],
+  ];
+  return choices.map(([pace, label, multiplier]) => ({
+    pace,
+    label,
+    rate: Number((measuredRate * multiplier).toPrecision(3)),
+  }));
+}
+
 export function fittedChoices(maximum: number, choices: number[]) {
   return [
     ...new Set([1, ...choices.filter((value) => value <= maximum), maximum]),

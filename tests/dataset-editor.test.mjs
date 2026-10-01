@@ -23,10 +23,15 @@ test("training summary counts all supported files, including Parquet, without re
     await fs.writeFile(path.join(root, "train.jsonl"), "12345");
     await fs.writeFile(path.join(root, "part.parquet"), "1234567");
     await fs.writeFile(path.join(root, "ignore.txt"), "123456789");
-    assert.deepEqual(await datasetTrainingSummary(root), {
-      fileCount: 2,
-      totalBytes: 12,
-    });
+    const summary = await datasetTrainingSummary(root);
+    assert.equal(summary.fileCount, 2);
+    assert.equal(summary.totalBytes, 12);
+    assert.match(summary.signature, /^[0-9a-f]{64}$/);
+    await fs.writeFile(path.join(root, "train.jsonl"), "12346");
+    assert.notEqual(
+      (await datasetTrainingSummary(root)).signature,
+      summary.signature,
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

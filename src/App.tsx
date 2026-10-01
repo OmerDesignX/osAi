@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import feather from "feather-icons";
 import type {
   AlignmentType,
+  AutoCalibrationResult,
   AppUpdateStatus,
   BackendInstallStatus,
   BackendStatus,
@@ -30,6 +31,7 @@ import {
   type HardwarePreset,
 } from "./hardware-presets.js";
 import {
+  calibratedLearningRateOptions,
   fittedChoices,
   learningRateOptions,
   type LearningPace,
@@ -234,7 +236,7 @@ const defaults: TrainingRequest = {
   optimizer: "auto",
   autoSettings: true,
   fullContentContext: false,
-  autoStop: false,
+  autoStop: true,
   multiGpu: "auto",
   liveRollouts: true,
   sessionName: "",
@@ -392,6 +394,7 @@ export function App() {
     source: string;
     fileCount: number;
     totalBytes: number;
+    signature: string;
   } | null>(null);
   const [datasetSummaryError, setDatasetSummaryError] = useState("");
   const [datasetSummaryBusy, setDatasetSummaryBusy] = useState(false);
@@ -408,6 +411,12 @@ export function App() {
   const [update, setUpdate] = useState(fallbackUpdate);
   const [notice, setNotice] = useState("");
   const [benchmarkBusy, setBenchmarkBusy] = useState(false);
+  const [calibrationBusy, setCalibrationBusy] = useState(false);
+  const [calibrationMessage, setCalibrationMessage] = useState("");
+  const [calibration, setCalibration] = useState<{
+    key: string;
+    result: AutoCalibrationResult;
+  } | null>(null);
   const [benchmarkPreset, setBenchmarkPreset] = useState<HardwarePreset | null>(
     null,
   );
@@ -490,27 +499,62 @@ export function App() {
     datasetSource &&
     (datasetSummaryBusy || (!currentDatasetSummary && !datasetSummaryError)),
   );
+  const calibrationSignature = JSON.stringify([
+    form.modelSource,
+    form.modelVersion,
+    form.tier,
+    form.customModelFolder,
+    form.engine,
+    form.accelerator,
+    form.multiGpu,
+    form.devices,
+    form.fineTuneData,
+    form.fullContentContext,
+    form.optimizer,
+    form.iterations,
+    form.scale,
+    form.dropout,
+    form.seed,
+    form.gradientAccumulationSteps,
+    form.gradientCheckpoint,
+    form.maskPrompt,
+    form.splitMode,
+    form.tensorSplit,
+    form.mainGpu,
+    form.distributedWorkers,
+    currentDatasetSummary?.signature ?? null,
+    deviceSignature,
+  ]);
+  const currentCalibration =
+    calibration?.key === calibrationSignature &&
+    form.autoSettings &&
+    form.learningRate !== null &&
+    form.learningRate <= calibration.result.learning_rate * 1.0001
+      ? calibration.result
+      : null;
   const rateOptions = useMemo(
     () =>
-      learningRateOptions({
-        datasetBytes: currentDatasetSummary?.totalBytes ?? null,
-        modelBytes:
-          form.modelSource === "custom"
-            ? ((form.autoSettings ? benchmarkModelBytes : null) ??
-              customModelBytes ??
-              3 * 1024 ** 3)
-            : ((form.autoSettings ? benchmarkModelBytes : null) ??
-              estimatedModelBytes(
-                hardware,
-                form.engine,
-                form.tier,
-                form.modelVersion,
-              )),
-        memoryBytes: hardware.physicalMemoryBytes,
-        batchSize: form.batchSize ?? hardwarePreset.batchSize,
-        rank: form.rank ?? hardwarePreset.rank,
-        epochs: form.iterations,
-      }),
+      currentCalibration
+        ? calibratedLearningRateOptions(currentCalibration.learning_rate)
+        : learningRateOptions({
+            datasetBytes: currentDatasetSummary?.totalBytes ?? null,
+            modelBytes:
+              form.modelSource === "custom"
+                ? ((form.autoSettings ? benchmarkModelBytes : null) ??
+                  customModelBytes ??
+                  3 * 1024 ** 3)
+                : ((form.autoSettings ? benchmarkModelBytes : null) ??
+                  estimatedModelBytes(
+                    hardware,
+                    form.engine,
+                    form.tier,
+                    form.modelVersion,
+                  )),
+            memoryBytes: hardware.physicalMemoryBytes,
+            batchSize: form.batchSize ?? hardwarePreset.batchSize,
+            rank: form.rank ?? hardwarePreset.rank,
+            epochs: form.iterations,
+          }),
     [
       currentDatasetSummary?.totalBytes,
       benchmarkModelBytes,
@@ -526,6 +570,7 @@ export function App() {
       hardware,
       hardwarePreset.batchSize,
       hardwarePreset.rank,
+      currentCalibration?.learning_rate,
     ],
   );
   const rateSelection =
@@ -617,6 +662,8 @@ export function App() {
     return () => window.removeEventListener("keydown", close);
   }, [guidanceOpen]);
 
+  useEffect(() => window.osai.onCalibrationProgress(setCalibrationMessage), []);
+
   const refreshSessions = useCallback(async () => {
     const next = await window.osai.listSessions();
     setSessions(next);
@@ -693,9 +740,23 @@ export function App() {
   }, [refreshBackend, refreshSessions]);
 
   useEffect(() => {
-    if (!form.autoSettings || active || starting) return;
+    if (
+      !form.autoSettings ||
+      active ||
+      starting ||
+      calibrationBusy ||
+      currentCalibration
+    )
+      return;
     setForm((current) => applyHardwarePreset(current, hardwarePreset));
-  }, [hardwarePreset, selectedId, active?.id, starting]);
+  }, [
+    hardwarePreset,
+    selectedId,
+    active?.id,
+    starting,
+    calibrationBusy,
+    currentCalibration,
+  ]);
 
   useEffect(() => {
     if (!form.autoSettings || !backend?.available || active || starting) {
@@ -733,6 +794,8 @@ export function App() {
       !form.autoSettings ||
       !backend?.available ||
       deviceSignature === null ||
+      calibrationBusy ||
+      currentCalibration ||
       active ||
       starting
     ) {
@@ -792,6 +855,8 @@ export function App() {
     deviceSignature,
     active?.id,
     starting,
+    calibrationBusy,
+    currentCalibration,
   ]);
 
   useEffect(() => setNoticeExpanded(false), [notice]);
@@ -984,7 +1049,55 @@ export function App() {
     if (value) setForm((current) => ({ ...current, adapter: value }));
   };
 
+  const calibrate = async () => {
+    if (!form.fineTuneData.trim()) {
+      setNotice("Choose a fine-tuning dataset before calibration");
+      return;
+    }
+    setCalibrationBusy(true);
+    setCalibrationMessage("Checking model, dataset and available hardware…");
+    setCalibration(null);
+    setNotice("");
+    try {
+      const result = await window.osai.autoCalibration(form);
+      setCalibration({ key: calibrationSignature, result });
+      setBenchmarkPreset({
+        profile: result.settings.profile,
+        batchSize: result.settings.batch_size,
+        maxSeqLength: result.settings.max_seq_length,
+        numLayers: result.settings.num_layers,
+        rank: result.settings.rank,
+        ggufBatchSize: result.settings.gguf_batch_size,
+        ggufThreads: result.settings.gguf_threads,
+        targetModules: result.settings.target_modules,
+      });
+      setBenchmarkModelBytes(result.settings.model_size_bytes);
+      setBenchmarkDevices(result.devices);
+      setLearningPace(null);
+      setForm((current) => ({
+        ...current,
+        learningRate: result.learning_rate,
+      }));
+      setCalibrationMessage(
+        `Ready · pilot loss ${result.first_loss.toFixed(3)} → ${result.last_loss.toFixed(3)} · rate ${result.learning_rate.toExponential(2)}`,
+      );
+    } catch (error) {
+      setCalibrationMessage("Calibration needs attention");
+      setNotice(readableError(error));
+    } finally {
+      setCalibrationBusy(false);
+    }
+  };
+
   const startTraining = async () => {
+    if (
+      form.autoSettings &&
+      form.stage !== "alignment" &&
+      !currentCalibration
+    ) {
+      setNotice("Calibrate the selected model and dataset before training");
+      return;
+    }
     setNotice("");
     setStarting(true);
     try {
@@ -1043,7 +1156,22 @@ export function App() {
       setSelectedId(session.id);
       await refreshSessions();
     } catch (error) {
-      setNotice(readableError(error));
+      const message = readableError(error);
+      if (
+        message.includes("Calibrate this model") ||
+        message.includes("Training data changed") ||
+        message.includes("Available hardware changed")
+      ) {
+        setCalibration(null);
+        setCalibrationMessage("Selections changed; run calibration again.");
+        void window.osai
+          .datasetTrainingSummary(form.fineTuneData)
+          .then((summary) =>
+            setDatasetSummary({ ...summary, source: form.fineTuneData.trim() }),
+          )
+          .catch(() => setDatasetSummary(null));
+      }
+      setNotice(message);
     } finally {
       setStarting(false);
     }
@@ -1390,7 +1518,7 @@ export function App() {
 
             <fieldset
               className="training-form"
-              disabled={Boolean(active) || starting}
+              disabled={Boolean(active) || starting || calibrationBusy}
             >
               <section className="form-section session-controls">
                 <div className="section-heading">
@@ -1425,7 +1553,9 @@ export function App() {
 
               <section className="form-section">
                 <div className="section-heading">
-                  <h2>Model</h2>
+                  <h2>
+                    <span className="workflow-step">1</span> Model
+                  </h2>
                   <p>Use an osCode model or choose your own model folder.</p>
                 </div>
 
@@ -1589,7 +1719,9 @@ export function App() {
 
               <section className="form-section">
                 <div className="section-heading">
-                  <h2>Pipeline</h2>
+                  <h2>
+                    <span className="workflow-step">2</span> Pipeline
+                  </h2>
                   <p>Choose the work osAi should run.</p>
                 </div>
                 <div className="segmented three">
@@ -1614,7 +1746,9 @@ export function App() {
 
               <section className="form-section">
                 <div className="section-heading">
-                  <h2>Data</h2>
+                  <h2>
+                    <span className="workflow-step">3</span> Data &amp; context
+                  </h2>
                   <p>
                     Text, image, video and compatible audio data stay on this
                     computer.
@@ -1793,6 +1927,16 @@ export function App() {
               )}
 
               <section className="form-section run-controls">
+                <div className="section-heading">
+                  <h2>
+                    <span className="workflow-step">4</span> Calibration &amp;
+                    settings
+                  </h2>
+                  <p>
+                    Measure a short local training sample, then review the
+                    fitted controls.
+                  </p>
+                </div>
                 <div className="settings-strip">
                   <label className="toggle-row">
                     <input
@@ -1810,8 +1954,8 @@ export function App() {
                     <span>
                       <b>Fit settings to this hardware</b>
                       <small>
-                        Automatically fit this device. Turn off for manual
-                        control.
+                        Calibrate the selected model and data before training.
+                        Turn off for manual control.
                       </small>
                     </span>
                   </label>
@@ -1820,8 +1964,14 @@ export function App() {
                       <button
                         type="button"
                         className="quiet-button compact-button quick-settings-trigger"
+                        disabled={form.autoSettings && !currentCalibration}
                         onClick={() => setGuidanceOpen(true)}
                         aria-haspopup="dialog"
+                        title={
+                          form.autoSettings && !currentCalibration
+                            ? "Calibrate first to unlock Quick Settings"
+                            : undefined
+                        }
                       >
                         <Icon name="sliders" /> Quick Settings
                       </button>
@@ -1829,6 +1979,7 @@ export function App() {
                     <button
                       type="button"
                       className="quiet-button compact-button"
+                      disabled={form.autoSettings && !currentCalibration}
                       onClick={() => setAdvanced(!advanced)}
                       aria-expanded={advanced}
                     >
@@ -1836,6 +1987,33 @@ export function App() {
                       <Icon name={advanced ? "chevron-up" : "chevron-down"} />
                     </button>
                   </div>
+                </div>
+                <div
+                  className={`calibration-status${currentCalibration ? " ready" : ""}`}
+                  role="status"
+                >
+                  <Icon
+                    name={
+                      calibrationBusy
+                        ? "loader"
+                        : currentCalibration
+                          ? "check-circle"
+                          : "activity"
+                    }
+                    size={15}
+                  />
+                  <span>
+                    {!form.autoSettings
+                      ? "Manual settings selected; calibration is optional."
+                      : calibrationBusy
+                        ? calibrationMessage
+                        : currentCalibration
+                          ? calibrationMessage ||
+                            `Pilot loss fell ${currentCalibration.improvement_percent.toFixed(1)}%. Ready to train.`
+                          : form.fineTuneData
+                            ? "Calibrate to measure a safe learning rate on the selected data."
+                            : "Select training data, then calibrate."}
+                  </span>
                 </div>
               </section>
 
@@ -2023,8 +2201,10 @@ export function App() {
                             </option>
                             {rateSelection === "previous" && (
                               <option value="previous">
-                                Previous setting ·{" "}
-                                {form.learningRate?.toExponential(2)}
+                                {currentCalibration
+                                  ? "Calibrated setting"
+                                  : "Previous setting"}{" "}
+                                · {form.learningRate?.toExponential(2)}
                               </option>
                             )}
                             {rateOptions.map((option) => (
@@ -2044,9 +2224,10 @@ export function App() {
                         <p className="guidance-error">{datasetSummaryError}</p>
                       )}
                       <p className="guidance-note">
-                        Learning rates use the selected data, model and fitted
-                        settings, with conservative limits. Batch, rank and
-                        context control memory use.
+                        Calibration checks a short training sample and selects a
+                        rate with decreasing pilot loss. Full training can still
+                        vary across examples; Auto stop watches for sustained
+                        loss increases.
                       </p>
                       <footer className="guidance-footer">
                         <button
@@ -2642,11 +2823,12 @@ export function App() {
               <div className="setting-heading">
                 <strong>Auto stop</strong>
                 <SettingInfo label="Auto stop">
-                  Watches average fine-tuning loss after a five-minute and 12%
-                  warm-up. It stops only when four consecutive loss windows rise
-                  on every reporting device. It saves and verifies a checkpoint
-                  before stopping. Training loss can be noisy, so leave this off
-                  if you prefer to decide from the graph.
+                  Watches average fine-tuning loss after five minutes of recent
+                  readings. It stops only when four consecutive loss windows
+                  rise on every reporting device, regardless of total dataset
+                  progress. It saves and verifies a checkpoint before stopping.
+                  Training loss can be noisy, so turn this off if you prefer to
+                  decide from the graph.
                 </SettingInfo>
               </div>
               <label className="toggle-row compact">
@@ -2763,15 +2945,47 @@ export function App() {
               ) : (
                 <button
                   className="primary-button start-button"
-                  disabled={starting || (form.autoSettings && benchmarkBusy)}
-                  onClick={() => void startTraining()}
+                  disabled={
+                    starting ||
+                    (!calibrationBusy &&
+                      form.autoSettings &&
+                      (benchmarkBusy || datasetSummaryPending))
+                  }
+                  onClick={() => {
+                    if (calibrationBusy) {
+                      setCalibrationMessage("Stopping calibration…");
+                      void window.osai.cancelAutoCalibration();
+                    } else if (
+                      form.autoSettings &&
+                      needsFineTune &&
+                      !currentCalibration
+                    )
+                      void calibrate();
+                    else void startTraining();
+                  }}
                 >
-                  <Icon name={starting || benchmarkBusy ? "loader" : "play"} />
+                  <Icon
+                    name={
+                      starting || benchmarkBusy || calibrationBusy
+                        ? "loader"
+                        : form.autoSettings &&
+                            needsFineTune &&
+                            !currentCalibration
+                          ? "activity"
+                          : "play"
+                    }
+                  />
                   {starting
                     ? "Starting…"
-                    : benchmarkBusy
-                      ? "Benchmarking…"
-                      : "Start training"}
+                    : calibrationBusy
+                      ? "Cancel calibration"
+                      : benchmarkBusy
+                        ? "Measuring hardware…"
+                        : form.autoSettings &&
+                            needsFineTune &&
+                            !currentCalibration
+                          ? "Calibrate"
+                          : "Start training"}
                 </button>
               )}
             </footer>

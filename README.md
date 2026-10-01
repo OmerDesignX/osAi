@@ -64,10 +64,10 @@ The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SD
 3. Leave **Engine**, **Accelerator**, and **Multi-GPU** on **Auto** for hardware-aware selection, or choose them manually.
 4. Under **Pipeline**, press **Fine-tune**, **Align**, or **Fine-tune + align**.
 5. Press the dataset browse button and select a `.json`, `.jsonl`, `.ndjson`, or `.parquet` file, or a folder containing data files.
-6. Keep **Fit settings to this hardware** enabled unless manual control is needed.
+6. Keep **Fit settings to this hardware** enabled and press **Calibrate**. osAi samples short excerpts from the selected files locally, tests cautious learning rates with the training backend, and unlocks **Quick Settings** when the pilot loss decreases. The selected data is not changed and the full records are used for training.
 7. Enter a recognizable **Session name**, or leave the suggested name in place.
 8. Choose **Save sessions in** when a different location is needed. The default is `~/osAi/sessions` in the user's home folder.
-9. Press **Start training**.
+9. Press **Start training** after calibration completes. Changing the model, dataset, optimizer, epoch count, context mode, or GPUs requires calibration again.
 
 While a run is active, **Start training** becomes **Pause training**, **Save checkpoint**, and **Stop training**. A paused run can be resumed from the same controls. **Save checkpoint** writes the current adapter at the next safe optimizer step; a paused run finishes its save after resuming. The session shows when the latest adapter and reusable model are ready. Automatic saves replace the same latest checkpoint rather than collecting numbered copies. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. Individual split shards, MLX files, and V2 GGUF projectors are downloaded from the selected V1/V2 catalog and checked against its published SHA-256 list. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
 
@@ -193,7 +193,7 @@ No rollout, critic, reward-model, telemetry, or internet server is started. PPO 
 
 ## Automatic hardware settings and multi-GPU
 
-**Fit settings to this hardware** is enabled by default. After CLI setup, osAi runs a local one-turn inference benchmark with the selected model and each selected GPU. It tries the largest profile allowed by host and reported GPU memory, keeping room for backward graphs and the operating system. Changing the model, accelerator, GPU settings, or attached devices reruns the benchmark and shows a notification. The dataset size does not affect the selected profile.
+**Fit settings to this hardware** is enabled by default. After CLI setup, osAi runs a local one-turn inference benchmark with the selected model and each selected GPU. It tries the largest profile allowed by host and reported GPU memory, keeping room for backward graphs and the operating system. Changing the model, accelerator, GPU settings, or attached devices reruns the benchmark and shows a notification. The dataset size does not affect the memory profile. Press **Calibrate** after selecting the dataset. A short training pilot then measures whether a cautious learning rate reduces loss on sampled records. Training stays locked until that pilot succeeds. A short pilot cannot guarantee decreasing loss throughout a long, varied dataset; **Auto stop** watches for sustained increases during the full run.
 
 Use **Advanced** to set:
 
@@ -235,7 +235,7 @@ Each run receives its own local date-and-time folder. The session view shows pro
 - Press a session tab to inspect that run.
 - Press **Save checkpoint** and wait for its saved status before stopping if you need the latest weights.
 - Press **Pause training** to save the adapter at the next safe optimizer step and suspend the running trainer. Resume continues that same process and its in-memory optimizer state. The pause button shows its pending state until the checkpoint is verified.
-- **Auto stop** can be switched on or off before and during a fine-tuning run, including while paused. After at least five minutes of loss readings and 12% training progress, it requires four consecutive rising average-loss windows on every reporting device. It saves and verifies the latest adapter before stopping. Auto stop is optional because training loss can fluctuate even when a run remains useful.
+- **Auto stop** is on by default and can be switched on or off before and during a fine-tuning run, including while paused. After at least five minutes of recent loss readings, it requires four consecutive rising average-loss windows on every reporting device, regardless of total dataset progress. It saves and verifies the latest adapter before stopping. Training loss can fluctuate even when a run remains useful, so this control remains optional.
 - Press **Stop** to end the worker; updates since the last saved checkpoint may be lost.
 - Press **Show files** to reveal the selected session.
 - Press **Open sessions** or the top-bar **Sessions** button to open the complete sessions folder.
@@ -277,11 +277,11 @@ For GGUF, the bundle keeps the original file or split shards and any multimodal 
 | **Method**                                | Select Auto, DPO, IPO, SimPO, ORPO, CPO, KTO, PPO, REINFORCE, RLOO, or GRPO |
 | **Optimizer**                             | Select Auto, SGD, or AdamW                                                  |
 | **Generate fresh answers locally**        | Enable local live rollout generation for alignment                          |
-| **Fit settings to this hardware**         | Apply RAM-aware engine and training settings                                |
+| **Fit settings to this hardware**         | Calibrate the selected data and model before training                       |
 | **Quick Settings**                        | Choose epochs, fitted batch and rank, and an adaptive learning-rate pace    |
 | **Name this session**                     | Replace the automatic run name                                              |
 | **Advanced**                              | Reveal optimization, LoRA, rollout, evaluation, and runtime controls        |
-| **Start training**                        | Validate the selections and start a detached local run                      |
+| **Calibrate / Start training**            | Measure a short local pilot, then start a detached local run                |
 | **Save checkpoint**                       | Save one replaceable adapter and reusable model at the next safe step       |
 | **Stop**                                  | Stop the selected active run cleanly                                        |
 | **Show files / Open sessions**            | Open local output folders                                                   |
@@ -294,7 +294,7 @@ App-update checks are available in **Settings**. Press **Install or repair** und
 
 Backend setup downloads the CLI source and Python dependencies, then compiles llama.cpp for the current computer. Existing managed installs are refreshed when the app's CLI revision changes. App updates and official model downloads also use the network. Training data and model outputs stay local.
 
-**Quick Settings** provides conservative learning-rate choices adjusted for the selected dataset size, model, epochs, and fitted batch and rank. Learning rate changes the update pace; batch, rank, and context determine most training memory use. Dataset size affects the rate suggestion, not the memory fit.
+**Quick Settings** unlocks after calibration and offers the measured learning rate and slower choices. Learning rate changes the update pace; batch, rank, and context determine most training memory use. The selected dataset is used to test learning rates, while its total size does not reduce the memory fit.
 
 ## Build release installers
 

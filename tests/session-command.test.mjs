@@ -612,6 +612,44 @@ test("passes a Parquet file and full-content request to the CLI", async () => {
   }
 });
 
+test("a calibrated auto run keeps the pilot's memory settings and learning rate", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-calibrated-run-"));
+  const data = path.join(root, "train.jsonl");
+  await fs.writeFile(data, '{"text":"test"}\n');
+  try {
+    const { args } = await buildOsAiArgs(
+      {
+        ...base,
+        stage: "fine-tuning",
+        fineTuneData: data,
+        calibrationApplied: true,
+        batchSize: 2,
+        maxSeqLength: 512,
+        rank: 4,
+        numLayers: 1,
+        ggufBatchSize: 2,
+        ggufThreads: 8,
+        targetModules: ["mlp.down_proj"],
+        learningRate: 0.000003,
+        devices: "CUDA0, CUDA1",
+      },
+      path.join(root, "sessions"),
+    );
+    assert.equal(args.includes("--auto-settings"), true);
+    for (const [flag, value] of [
+      ["--batch-size", "2"],
+      ["--max-seq-length", "512"],
+      ["--rank", "4"],
+      ["--gguf-batch-size", "2"],
+      ["--learning-rate", "0.000003"],
+    ])
+      assert.equal(args[args.indexOf(flag) + 1], value);
+    assert.equal(args.filter((value) => value === "--device").length, 2);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("builds a non-interactive combined osAi command with local rollouts", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-command-"));
   const fine = path.join(root, "fine");

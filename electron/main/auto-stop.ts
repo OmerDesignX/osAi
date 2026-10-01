@@ -29,7 +29,7 @@ export class LossRiseDetector {
         const recent = series.slice(-windowSize * windowCount);
         return (
           recent.length === windowSize * windowCount &&
-          recent.at(-1)!.percent - recent[0].percent >= 1
+          recent.at(-1)!.at - recent[0].at >= minimumTimeMs
         );
       })
     );
@@ -52,13 +52,13 @@ export class LossRiseDetector {
     readings.push({ at, percent: metric.percent, loss: metric.loss });
     if (readings.length > 256) readings.shift();
     this.readings.set(metric.device, readings);
-    if (!this.ready(at) || metric.percent < 12) return null;
+    if (!this.ready(at)) return null;
 
     const trends = [...this.readings.values()].map((series) => {
       const recent = series.slice(-windowSize * windowCount);
       if (
         recent.length < windowSize * windowCount ||
-        recent.at(-1)!.percent - recent[0].percent < 1
+        recent.at(-1)!.at - recent[0].at < minimumTimeMs
       )
         return null;
       const averages = Array.from({ length: windowCount }, (_, index) => {

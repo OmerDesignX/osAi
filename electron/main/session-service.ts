@@ -500,7 +500,7 @@ export async function buildOsAiArgs(
   const needsAlignment = input.stage !== "fine-tuning";
   if (input.fullContentContext && needsFineTune)
     args.push("--full-content-context");
-  if (!input.autoSettings) {
+  if (!input.autoSettings || input.calibrationApplied) {
     pushOptional(
       args,
       "--batch-size",

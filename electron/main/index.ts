@@ -11,9 +11,18 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Preferences, TrainingRequest } from "../types.js";
+import type {
+  AutoCalibrationResult,
+  Preferences,
+  TrainingRequest,
+} from "../types.js";
 import { BackendInstaller } from "./backend-installer.js";
 import { readAutoDevices, runAutoBenchmark } from "./auto-benchmark.js";
+import {
+  calibrationKey,
+  cancelAutoCalibration,
+  runAutoCalibration,
+} from "./auto-calibration.js";
 import { readPreferences, writePreferences } from "./preferences.js";
 import { SessionService } from "./session-service.js";
 import { stopSessionTrainers } from "./session-processes.js";
@@ -34,6 +43,12 @@ let sessionService: SessionService;
 let updateService: AppUpdateService;
 let backendInstaller: BackendInstaller;
 let pendingMacInstaller = "";
+let approvedCalibration: {
+  key: string;
+  datasetSignature: string;
+  deviceSignature: string;
+  result: AutoCalibrationResult;
+} | null = null;
 
 async function moveSessionToTrash(directory: string) {
   let cleanupError: unknown;
@@ -297,6 +312,51 @@ function registerIpc() {
       throw new Error("Install the current osAi CLI before benchmarking");
     return runAutoBenchmark(status.executable, value as TrainingRequest);
   });
+  ipcMain.handle(
+    "training:auto-calibration",
+    async (_event, value: unknown) => {
+      const status = await sessionService.backendStatus();
+      if (
+        !status.available ||
+        !(await backendInstaller.isCurrent(status.executable))
+      )
+        throw new Error("Install the current osAi CLI before calibration");
+      approvedCalibration = null;
+      const input = value as TrainingRequest;
+      const [before, devicesBefore] = await Promise.all([
+        datasetTrainingSummary(input.fineTuneData),
+        readAutoDevices(status.executable, input.accelerator),
+      ]);
+      const result = await runAutoCalibration(
+        status.executable,
+        input,
+        (message) => send("training:calibration-progress", message),
+      );
+      const [after, devicesAfter] = await Promise.all([
+        datasetTrainingSummary(input.fineTuneData),
+        readAutoDevices(status.executable, input.accelerator),
+      ]);
+      if (after.signature !== before.signature)
+        throw new Error(
+          "Training data changed during calibration; run calibration again",
+        );
+      if (JSON.stringify(devicesAfter) !== JSON.stringify(devicesBefore))
+        throw new Error(
+          "Available hardware changed during calibration; run calibration again",
+        );
+      approvedCalibration = {
+        key: calibrationKey(input),
+        datasetSignature: after.signature,
+        deviceSignature: JSON.stringify(devicesAfter),
+        result,
+      };
+      return result;
+    },
+  );
+  ipcMain.handle("training:auto-calibration-cancel", () => {
+    cancelAutoCalibration();
+    approvedCalibration = null;
+  });
   ipcMain.handle("training:auto-devices", async (_event, value: unknown) => {
     const status = await sessionService.backendStatus();
     if (
@@ -310,14 +370,47 @@ function registerIpc() {
     );
   });
   ipcMain.handle("training:start", async (_event, value: unknown) => {
+    const input = value as TrainingRequest;
     const status = await sessionService.backendStatus();
     if (
       !status.available ||
       !(await backendInstaller.isCurrent(status.executable))
     )
       throw new Error("Install the current osAi CLI from main before training");
+    if (input.autoSettings && input.stage !== "alignment") {
+      if (
+        !approvedCalibration ||
+        approvedCalibration.key !== calibrationKey(input) ||
+        approvedCalibration.datasetSignature !==
+          (await datasetTrainingSummary(input.fineTuneData)).signature ||
+        approvedCalibration.deviceSignature !==
+          JSON.stringify(
+            await readAutoDevices(status.executable, input.accelerator),
+          ) ||
+        !input.learningRate ||
+        input.learningRate > approvedCalibration.result.learning_rate * 1.0001
+      )
+        throw new Error(
+          "Calibrate this model, dataset and hardware before training",
+        );
+    }
     await migrateModelsIfIdle();
-    return sessionService.start(value as TrainingRequest);
+    const request =
+      input.autoSettings && input.stage !== "alignment" && approvedCalibration
+        ? {
+            ...input,
+            calibrationApplied: true,
+            batchSize: approvedCalibration.result.settings.batch_size,
+            maxSeqLength: approvedCalibration.result.settings.max_seq_length,
+            numLayers: approvedCalibration.result.settings.num_layers,
+            rank: approvedCalibration.result.settings.rank,
+            ggufBatchSize: approvedCalibration.result.settings.gguf_batch_size,
+            ggufThreads: approvedCalibration.result.settings.gguf_threads,
+            targetModules: approvedCalibration.result.settings.target_modules,
+            devices: approvedCalibration.result.devices.join(", "),
+          }
+        : input;
+    return sessionService.start(request);
   });
   ipcMain.handle("training:pause", (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
@@ -527,6 +620,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  cancelAutoCalibration();
   updateService?.dispose();
   if (process.platform === "darwin" && pendingMacInstaller) {
     const installer = pendingMacInstaller;

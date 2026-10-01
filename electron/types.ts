@@ -49,6 +49,7 @@ export type TrainingRequest = {
   alignmentType: AlignmentType;
   optimizer: Optimizer;
   autoSettings: boolean;
+  calibrationApplied?: boolean;
   fullContentContext: boolean;
   autoStop: boolean;
   multiGpu: "auto" | "on" | "off";
@@ -112,6 +113,19 @@ export type AutoBenchmarkResult = {
   devices: string[];
   elapsed_seconds: number;
   cached: boolean;
+};
+
+export type AutoCalibrationResult = Omit<
+  AutoBenchmarkResult,
+  "elapsed_seconds" | "cached"
+> & {
+  learning_rate: number;
+  optimizer: "sgd" | "adamw";
+  sample_rows: number;
+  source_rows: number;
+  first_loss: number;
+  last_loss: number;
+  improvement_percent: number;
 };
 
 export type SessionArtifacts = {
@@ -336,13 +350,16 @@ export type OsAiBridge = {
   inspectDataset(source: string): Promise<DatasetInspection>;
   datasetTrainingSummary(
     source: string,
-  ): Promise<{ fileCount: number; totalBytes: number }>;
+  ): Promise<{ fileCount: number; totalBytes: number; signature: string }>;
   modelTrainingSummary(source: string): Promise<number>;
   saveDataset(value: DatasetEditorRequest): Promise<DatasetEditorResult>;
   backendStatus(): Promise<BackendStatus>;
   backendInstallStatus(): Promise<BackendInstallStatus>;
   installBackend(): Promise<BackendInstallStatus>;
   autoBenchmark(value: TrainingRequest): Promise<AutoBenchmarkResult>;
+  autoCalibration(value: TrainingRequest): Promise<AutoCalibrationResult>;
+  cancelAutoCalibration(): Promise<void>;
+  onCalibrationProgress(callback: (message: string) => void): () => void;
   autoDevices(
     accelerator: Accelerator,
   ): Promise<{ accelerator: string; devices: string[] }>;

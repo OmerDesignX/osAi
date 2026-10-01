@@ -31,6 +31,16 @@ const bridge: OsAiBridge = {
   installBackend: () => ipcRenderer.invoke("backend-install:start"),
   autoBenchmark: (value: TrainingRequest) =>
     ipcRenderer.invoke("training:auto-benchmark", value),
+  autoCalibration: (value: TrainingRequest) =>
+    ipcRenderer.invoke("training:auto-calibration", value),
+  cancelAutoCalibration: () =>
+    ipcRenderer.invoke("training:auto-calibration-cancel"),
+  onCalibrationProgress: (callback: (message: string) => void) => {
+    const listener = (_event: unknown, message: string) => callback(message);
+    ipcRenderer.on("training:calibration-progress", listener);
+    return () =>
+      ipcRenderer.removeListener("training:calibration-progress", listener);
+  },
   autoDevices: (accelerator: TrainingRequest["accelerator"]) =>
     ipcRenderer.invoke("training:auto-devices", accelerator),
   startTraining: (value: TrainingRequest) =>
