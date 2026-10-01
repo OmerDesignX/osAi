@@ -2,7 +2,43 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-if (process.argv.includes("--pause-checkpoint")) {
+if (process.argv.includes("--auto-stop")) {
+  const request = process.env.OSAI_CHECKPOINT_REQUEST;
+  let savedGeneration = "";
+  let step = 0;
+  process.stdout.write(
+    "osai: training plan examples=80 epochs=1 batch=1 steps=80 optimizer_updates=80\n",
+  );
+  const timer = setInterval(() => {
+    step += 1;
+    const loss = [1, 1.02, 1.04, 1.07, 1.09, 1.11, 1.13][
+      Math.min(6, Math.floor((step - 1) / 12))
+    ];
+    process.stdout.write(`train: data=${step}/80 loss=${loss}\n`);
+    const generation = fs.existsSync(request)
+      ? fs.readFileSync(request, "utf8").trim()
+      : "";
+    if (generation && generation !== savedGeneration) {
+      savedGeneration = generation;
+      const output = path.join(
+        path.dirname(request),
+        "outputs",
+        "checkpoint",
+        "adapter",
+        "last.gguf",
+      );
+      fs.mkdirSync(path.dirname(output), { recursive: true });
+      fs.writeFileSync(output, `adapter at ${step}`);
+      process.stdout.write(
+        `osai: checkpoint saved path=${output} generation=${generation}\n`,
+      );
+    }
+    if (step === 80) {
+      clearInterval(timer);
+      process.exit(0);
+    }
+  }, 90);
+} else if (process.argv.includes("--pause-checkpoint")) {
   const request = process.env.OSAI_CHECKPOINT_REQUEST;
   if (process.argv.includes("--nested-trainer")) {
     const heartbeat = path.join(path.dirname(request), "nested-heartbeat.txt");

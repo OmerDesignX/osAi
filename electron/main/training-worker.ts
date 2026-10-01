@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { SessionState, WorkerJob } from "../types.js";
 import { backendRuntimeEnvironment } from "./backend-source.js";
+import { LossRiseDetector } from "./auto-stop.js";
 import {
   cleanTerminalLine,
   FineTuneProgressParser,
@@ -27,6 +28,8 @@ let child: ChildProcess | null = null;
 let stopping = false;
 let paused = false;
 let pauseGeneration = "";
+let autoStopGeneration = "";
+let autoStopped = false;
 let pausedIndeterminate = false;
 let finalised = false;
 let lastStderrLine = "";
@@ -39,6 +42,21 @@ let lastCheckpointRequest = "";
 let metricWrites = Promise.resolve();
 let mlxMetricTable = false;
 const lastMetric = new Map<string, { at: number; percent: number }>();
+const lossRise = new LossRiseDetector();
+
+function disableAutoStop(message: string) {
+  state.autoStopEnabled = false;
+  state.autoStopMessage = message;
+  if (state.request) state.request.autoStop = false;
+  lossRise.setEnabled(false);
+  if (job.autoStopPath) {
+    try {
+      writeFileSync(job.autoStopPath, "off\n", { mode: 0o600 });
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : String(error);
+    }
+  }
+}
 
 function recordMetric(metric: TrainingMetric, force = false) {
   const previous = lastMetric.get(metric.device);
@@ -144,6 +162,8 @@ function consumeLine(raw: string) {
       void scheduleStateWrite(true);
       if (pauseGeneration && checkpoint[2] === pauseGeneration)
         void completePause(savedPath);
+      if (autoStopGeneration && checkpoint[2] === autoStopGeneration)
+        void completeAutomaticStop(savedPath);
     }
     return;
   }
@@ -159,6 +179,13 @@ function consumeLine(raw: string) {
   }
   if (/osai: checkpoint failed\b/i.test(line)) {
     state.checkpointStatus = "failed";
+    if (autoStopGeneration) {
+      autoStopGeneration = "";
+      state.status = "running";
+      disableAutoStop(
+        "Auto stop could not save a checkpoint; training continues",
+      );
+    }
     if (pauseGeneration) {
       pauseGeneration = "";
       state.status = "running";
@@ -346,7 +373,19 @@ function consumeLine(raw: string) {
   }
   if (state.phase === "fine-tuning" && state.trainingPercent !== undefined) {
     const metric = lossMetric(line, state.trainingPercent, mlxMetricTable);
-    if (metric) recordMetric(metric);
+    if (metric) {
+      recordMetric(metric);
+      if (state.status === "running") {
+        const rise = lossRise.observe(metric);
+        if (
+          state.autoStopEnabled &&
+          state.autoStopMessage === "Gathering a loss baseline" &&
+          lossRise.ready()
+        )
+          state.autoStopMessage = "Watching average loss for a sustained rise";
+        if (rise) void requestAutomaticStop(rise);
+      }
+    }
   }
   void scheduleStateWrite();
 }
@@ -458,6 +497,58 @@ async function requestPause() {
   await scheduleStateWrite(true);
 }
 
+async function requestAutomaticStop(reason: string) {
+  if (stopping || autoStopGeneration || pauseGeneration || !child?.pid) return;
+  if (!job.checkpointRequestPath) return;
+  autoStopGeneration = randomUUID();
+  const pending = `${job.checkpointRequestPath}.${process.pid}.pending`;
+  try {
+    await fs.writeFile(pending, `${autoStopGeneration}\n`, { mode: 0o600 });
+    await fs.rename(pending, job.checkpointRequestPath);
+    state.status = "stopping";
+    state.checkpointStatus = "requested";
+    state.autoStopMessage = `Loss rise detected: ${reason}. Saving the latest checkpoint`;
+    state.message = "Auto stop is saving a checkpoint before stopping";
+    await scheduleStateWrite(true);
+  } catch (error) {
+    autoStopGeneration = "";
+    disableAutoStop(
+      "Auto stop could not request a checkpoint; training continues",
+    );
+    state.status = "running";
+    state.error = error instanceof Error ? error.message : String(error);
+    await fs.rm(pending, { force: true }).catch(() => undefined);
+    await scheduleStateWrite(true);
+  }
+}
+
+async function completeAutomaticStop(savedPath: string) {
+  if (!autoStopGeneration || stopping || !child?.pid) return;
+  try {
+    const snapshot = await fs.stat(savedPath);
+    if (!snapshot.isFile() || snapshot.size === 0)
+      throw new Error("The Auto stop checkpoint adapter is empty");
+  } catch (error) {
+    autoStopGeneration = "";
+    disableAutoStop(
+      "Auto stop could not verify its checkpoint; training continues",
+    );
+    state.status = "running";
+    state.error = error instanceof Error ? error.message : String(error);
+    await scheduleStateWrite(true);
+    return;
+  }
+  autoStopped = true;
+  autoStopGeneration = "";
+  state.autoStopMessage =
+    "Stopped after sustained rising loss; checkpoint saved";
+  await terminateTree().catch(async (error) => {
+    state.error = error instanceof Error ? error.message : String(error);
+    child?.kill("SIGKILL");
+    await scheduleStateWrite(true);
+  });
+}
+
 async function completePause(savedPath: string) {
   if (!pauseGeneration || paused || stopping || !child?.pid) return;
   try {
@@ -514,6 +605,21 @@ async function checkControlRequests() {
       await terminateTree();
       return;
     }
+    if (job.autoStopPath && (await exists(job.autoStopPath))) {
+      const setting = (await fs.readFile(job.autoStopPath, "utf8")).trim();
+      if (setting === "on" || setting === "off") {
+        const enabled = setting === "on";
+        if (state.autoStopEnabled !== enabled) {
+          state.autoStopEnabled = enabled;
+          if (state.request) state.request.autoStop = enabled;
+          state.autoStopMessage = enabled
+            ? "Gathering a loss baseline"
+            : "Auto stop is off";
+          lossRise.setEnabled(enabled);
+          await scheduleStateWrite(true);
+        }
+      }
+    }
     if (await exists(pausePath)) {
       await fs.rm(pausePath, { force: true });
       await requestPause();
@@ -549,7 +655,9 @@ async function terminateTree() {
   stopping = true;
   pauseGeneration = "";
   state.status = "stopping";
-  state.message = "Stopping the osAi process";
+  state.message = autoStopped
+    ? "Auto stop saved a checkpoint and is stopping training"
+    : "Stopping the osAi process";
   await scheduleStateWrite(true);
   if (!child?.pid) return;
   if (paused) {
@@ -617,7 +725,9 @@ async function finish(
     status === "completed"
       ? "Training completed successfully"
       : status === "stopped"
-        ? "Training stopped by the user"
+        ? autoStopped
+          ? "Auto stop saved a checkpoint after sustained rising loss"
+          : "Training stopped by the user"
         : "Training failed; open the log for details";
   if (error) state.error = error.slice(0, 1000);
   await metricWrites.catch(() => undefined);
@@ -630,6 +740,7 @@ async function main() {
   if (job.schemaVersion !== 1 || state.id !== job.id)
     throw new Error("Invalid training job");
   fineTuneProgress = new FineTuneProgressParser(job.iterations);
+  lossRise.setEnabled(Boolean(state.autoStopEnabled));
   state.status = "running";
   state.startedAt = new Date().toISOString();
   state.workerPid = process.pid;

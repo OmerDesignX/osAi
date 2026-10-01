@@ -104,8 +104,8 @@ fine-tuning** or **Use for alignment** returns that copy to the training form;
 hardware fitting uses the model and available hardware; the dataset's row count
 and token-limit recommendation do not change the Auto training profile.
 
-After selecting fine-tuning data, press **Use largest record as context** to
-scan all training records and request a context that holds the largest one.
+The **Context** control offers **Windowing** (default) and **Full**. Full scans
+all training records and requests a context that holds the largest one.
 The model tokenizer determines the count. Overlapping windows remain the
 default because a full record can exceed the model's context limit or device
 memory. If Auto encounters a device memory limit, it retries with smaller
@@ -235,12 +235,13 @@ Each run receives its own local date-and-time folder. The session view shows pro
 - Press a session tab to inspect that run.
 - Press **Save checkpoint** and wait for its saved status before stopping if you need the latest weights.
 - Press **Pause training** to save the adapter at the next safe optimizer step and suspend the running trainer. Resume continues that same process and its in-memory optimizer state. The pause button shows its pending state until the checkpoint is verified.
+- **Auto stop** can be switched on or off before and during a fine-tuning run, including while paused. After at least five minutes of loss readings and 12% training progress, it requires four consecutive rising average-loss windows on every reporting device. It saves and verifies the latest adapter before stopping. Auto stop is optional because training loss can fluctuate even when a run remains useful.
 - Press **Stop** to end the worker; updates since the last saved checkpoint may be lost.
 - Press **Show files** to reveal the selected session.
 - Press **Open sessions** or the top-bar **Sessions** button to open the complete sessions folder.
 - Closing the App does not stop training. The detached local worker continues until completion or until **Stop** is pressed.
 
-The session stores its selected settings, progress, checkpoint state, log, and a compact `metrics.csv`. The loss graph reads this history when the App reopens; its CSV button exports the metrics. A paused trainer remains resumable while its detached process is alive. A system restart ends that process, and the adapter checkpoint does not contain the native trainer's optimizer state or data cursor for an exact restart.
+The session stores its selected settings, progress, checkpoint state, log, and a compact `metrics.csv`. The loss graph reads this history when the App reopens; its CSV button exports the metrics. Training settings stay disabled until the run has stopped, while Auto stop remains adjustable. A paused trainer remains resumable while its detached process is alive. A system restart ends that process, and the adapter checkpoint does not contain the native trainer's optimizer state or data cursor for an exact restart.
 
 A completed run contains the same organized output as osAi CLI:
 

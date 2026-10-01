@@ -331,6 +331,14 @@ function registerIpc() {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.checkpoint(id);
   });
+  ipcMain.handle(
+    "training:auto-stop",
+    (_event, id: unknown, enabled: unknown) => {
+      if (typeof id !== "string" || typeof enabled !== "boolean")
+        throw new Error("Invalid Auto stop setting");
+      return sessionService.setAutoStop(id, enabled);
+    },
+  );
   ipcMain.handle("training:stop", (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.stop(id);

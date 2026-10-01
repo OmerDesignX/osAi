@@ -50,6 +50,7 @@ export type TrainingRequest = {
   optimizer: Optimizer;
   autoSettings: boolean;
   fullContentContext: boolean;
+  autoStop: boolean;
   multiGpu: "auto" | "on" | "off";
   liveRollouts: boolean;
   sessionName: string;
@@ -130,6 +131,7 @@ export type WorkerJob = {
   pausePath?: string;
   resumePath?: string;
   checkpointRequestPath?: string;
+  autoStopPath?: string;
   stage: TrainingStage;
   iterations: number;
   alignmentIterations: number;
@@ -161,6 +163,8 @@ export type SessionState = {
     | "complete";
   progress: number;
   trainingPercent?: number;
+  autoStopEnabled?: boolean;
+  autoStopMessage?: string;
   indeterminate: boolean;
   message: string;
   autoSettingsSummary?: string;
@@ -345,6 +349,7 @@ export type OsAiBridge = {
   pauseTraining(id: string): Promise<SessionState>;
   resumeTraining(id: string): Promise<SessionState>;
   saveCheckpoint(id: string): Promise<SessionState>;
+  setAutoStop(id: string, enabled: boolean): Promise<SessionState>;
   stopTraining(id: string): Promise<SessionState>;
   restartSession(id: string, value: TrainingRequest): Promise<SessionState>;
   deleteSession(id: string): Promise<void>;

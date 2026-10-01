@@ -1192,6 +1192,7 @@ export class SessionService {
       pausePath: path.join(directory, "pause.request"),
       resumePath: path.join(directory, "resume.request"),
       checkpointRequestPath: path.join(directory, "checkpoint.request"),
+      autoStopPath: path.join(directory, "auto-stop.setting"),
       stage: input.stage,
       iterations: input.iterations,
       alignmentIterations: input.alignmentIterations,
@@ -1205,6 +1206,8 @@ export class SessionService {
       phase: "preparing",
       progress: 0,
       indeterminate: true,
+      autoStopEnabled: Boolean(input.autoStop),
+      autoStopMessage: input.autoStop ? "Gathering a loss baseline" : undefined,
       message: "Starting the local osAi worker",
       createdAt: job.createdAt,
       sessionDirectory: directory,
@@ -1447,6 +1450,31 @@ export class SessionService {
     await fs.writeFile(pending, `${randomUUID()}\n`, { mode: 0o600 });
     await fs.rename(pending, request);
     return { ...state, checkpointStatus: "requested" as const };
+  }
+
+  async setAutoStop(id: string, enabled: boolean) {
+    const state = await this.find(id);
+    if (!["queued", "running", "pausing", "paused"].includes(state.status))
+      throw new Error("Auto stop can change only while training is active");
+    const job = JSON.parse(
+      await fs.readFile(path.join(state.sessionDirectory, "job.json"), "utf8"),
+    ) as WorkerJob;
+    const request = path.join(state.sessionDirectory, "auto-stop.setting");
+    if (!job.autoStopPath || path.resolve(job.autoStopPath) !== request)
+      throw new Error("Auto stop is available for newly started sessions");
+    const pending = `${request}.${process.pid}.pending`;
+    await fs.writeFile(pending, enabled ? "on\n" : "off\n", { mode: 0o600 });
+    await fs.rename(pending, request);
+    const started = Date.now();
+    while (Date.now() - started < 8_000) {
+      const updated = await readState(
+        path.join(state.sessionDirectory, "state.json"),
+      );
+      if (updated?.autoStopEnabled === enabled) return updated;
+      if (updated && !activeStatuses.has(updated.status)) return updated;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("The trainer did not apply the Auto stop change");
   }
 
   async log(id: string) {

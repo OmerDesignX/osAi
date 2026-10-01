@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import feather from "feather-icons";
 import type {
@@ -41,6 +48,68 @@ function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
     "aria-hidden": "true",
   });
   return <span className="icon" dangerouslySetInnerHTML={{ __html: markup }} />;
+}
+
+function SettingInfo({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const appRoot =
+    typeof document === "undefined" ? null : document.querySelector(".app");
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [open]);
+  return (
+    <span className="setting-info">
+      <button
+        type="button"
+        aria-label={`About ${label}`}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon name="info" size={15} />
+      </button>
+      {open &&
+        appRoot &&
+        createPortal(
+          <div
+            className="setting-info-backdrop"
+            onPointerDown={(event) => {
+              if (event.target === event.currentTarget) setOpen(false);
+            }}
+          >
+            <section
+              className="setting-info-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label={label}
+            >
+              <header>
+                <strong>{label}</strong>
+                <button
+                  type="button"
+                  aria-label="Close explanation"
+                  onClick={() => setOpen(false)}
+                >
+                  <Icon name="x" size={16} />
+                </button>
+              </header>
+              <p>{children}</p>
+            </section>
+          </div>,
+          appRoot,
+        )}
+    </span>
+  );
 }
 
 function PathField({
@@ -165,6 +234,7 @@ const defaults: TrainingRequest = {
   optimizer: "auto",
   autoSettings: true,
   fullContentContext: false,
+  autoStop: false,
   multiGpu: "auto",
   liveRollouts: true,
   sessionName: "",
@@ -363,6 +433,7 @@ export function App() {
   const [deletingSession, setDeletingSession] = useState(false);
   const [restartingSession, setRestartingSession] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [autoStopBusy, setAutoStopBusy] = useState(false);
   const [sessionControl, setSessionControl] = useState<
     "" | "pausing" | "resuming" | "saving" | "stopping"
   >("");
@@ -389,6 +460,11 @@ export function App() {
       session.status,
     ),
   );
+  const autoStopAvailable =
+    (active?.request?.stage || form.stage) !== "alignment";
+  useEffect(() => {
+    if (active) setGuidanceOpen(false);
+  }, [active?.id]);
   const sessionMenuSession = sessions.find(
     (session) => session.id === sessionMenu?.id,
   );
@@ -518,7 +594,7 @@ export function App() {
   }, [form.modelSource, form.customModelFolder]);
 
   useEffect(() => {
-    if (!learningPace || datasetSummaryPending) return;
+    if (!learningPace || datasetSummaryPending || active || starting) return;
     const rate = rateOptions.find(
       (option) => option.pace === learningPace,
     )?.rate;
@@ -528,7 +604,7 @@ export function App() {
           ? current
           : { ...current, learningRate: rate },
       );
-  }, [learningPace, rateOptions, datasetSummaryPending]);
+  }, [learningPace, rateOptions, datasetSummaryPending, active?.id, starting]);
 
   useEffect(() => {
     if (!guidanceOpen) return;
@@ -616,12 +692,12 @@ export function App() {
   }, [refreshBackend, refreshSessions]);
 
   useEffect(() => {
-    if (!form.autoSettings) return;
+    if (!form.autoSettings || active || starting) return;
     setForm((current) => applyHardwarePreset(current, hardwarePreset));
-  }, [hardwarePreset, selectedId]);
+  }, [hardwarePreset, selectedId, active?.id, starting]);
 
   useEffect(() => {
-    if (!form.autoSettings || !backend?.available) {
+    if (!form.autoSettings || !backend?.available || active || starting) {
       setDeviceSignature(null);
       return;
     }
@@ -643,10 +719,22 @@ export function App() {
       current = false;
       window.clearInterval(interval);
     };
-  }, [backend?.available, form.autoSettings, form.accelerator]);
+  }, [
+    backend?.available,
+    form.autoSettings,
+    form.accelerator,
+    active?.id,
+    starting,
+  ]);
 
   useEffect(() => {
-    if (!form.autoSettings || !backend?.available || deviceSignature === null) {
+    if (
+      !form.autoSettings ||
+      !backend?.available ||
+      deviceSignature === null ||
+      active ||
+      starting
+    ) {
       setBenchmarkBusy(false);
       return;
     }
@@ -701,6 +789,8 @@ export function App() {
     form.tensorSplit,
     form.mainGpu,
     deviceSignature,
+    active?.id,
+    starting,
   ]);
 
   useEffect(() => setNoticeExpanded(false), [notice]);
@@ -933,6 +1023,7 @@ export function App() {
       }
       const request = {
         ...form,
+        autoStop: form.stage !== "alignment" && form.autoStop,
         sessionsRoot: form.sessionsRoot || preferences.sessionsRoot,
         reuseDataset: form.stage === "fine-tune-align" && sameDataset,
         alignmentData:
@@ -967,6 +1058,28 @@ export function App() {
       setNotice(readableError(error));
     } finally {
       setSessionControl("");
+    }
+  };
+
+  const changeAutoStop = async (enabled: boolean) => {
+    if (!active) {
+      setForm((current) => ({ ...current, autoStop: enabled }));
+      return;
+    }
+    setAutoStopBusy(true);
+    setNotice("");
+    try {
+      const updated = await window.osai.setAutoStop(active.id, enabled);
+      setForm((current) => ({ ...current, autoStop: enabled }));
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === updated.id ? updated : session,
+        ),
+      );
+    } catch (error) {
+      setNotice(readableError(error));
+    } finally {
+      setAutoStopBusy(false);
     }
   };
 
@@ -1274,7 +1387,10 @@ export function App() {
               </div>
             </header>
 
-            <div className="training-form">
+            <fieldset
+              className="training-form"
+              disabled={Boolean(active) || starting}
+            >
               <section className="form-section session-controls">
                 <div className="section-heading">
                   <h2>Session</h2>
@@ -1519,30 +1635,52 @@ export function App() {
                     }
                   />
                 )}
-                {needsFineTune && form.fineTuneData && (
-                  <button
-                    type="button"
-                    className="quiet-button data-editor-launch"
-                    aria-pressed={form.fullContentContext}
-                    onClick={() =>
-                      setForm((current) => ({
-                        ...current,
-                        fullContentContext: !current.fullContentContext,
-                      }))
-                    }
-                  >
-                    <Icon name="maximize-2" />
-                    {form.fullContentContext
-                      ? "Use overlapping windows (default)"
-                      : "Use largest record as context"}
-                  </button>
-                )}
-                {needsFineTune && form.fullContentContext && (
-                  <p className="field-hint">
-                    The trainer will scan all selected files before training. If
-                    the full record exceeds model or device memory, use
-                    overlapping windows.
-                  </p>
+                {needsFineTune && (
+                  <div className="context-choice">
+                    <div className="setting-heading">
+                      <strong>Context</strong>
+                      <SettingInfo label="context mode">
+                        Windowing splits long records into overlapping training
+                        windows without dropping their answer tokens. Full scans
+                        the dataset and requests enough context for its longest
+                        record. Full needs more memory and cannot exceed the
+                        model's context limit.
+                      </SettingInfo>
+                    </div>
+                    <div className="segmented two" aria-label="Context mode">
+                      <button
+                        type="button"
+                        className={!form.fullContentContext ? "active" : ""}
+                        aria-pressed={!form.fullContentContext}
+                        onClick={() =>
+                          setForm((current) => ({
+                            ...current,
+                            fullContentContext: false,
+                          }))
+                        }
+                      >
+                        Windowing
+                      </button>
+                      <button
+                        type="button"
+                        className={form.fullContentContext ? "active" : ""}
+                        aria-pressed={form.fullContentContext}
+                        onClick={() =>
+                          setForm((current) => ({
+                            ...current,
+                            fullContentContext: true,
+                          }))
+                        }
+                      >
+                        Full
+                      </button>
+                    </div>
+                    <small>
+                      {form.fullContentContext
+                        ? "Use the longest record if the model and memory allow it."
+                        : "Use overlapping windows for long records."}
+                    </small>
+                  </div>
                 )}
                 {stage === "fine-tune-align" && (
                   <label className="toggle-row compact">
@@ -2497,6 +2635,50 @@ export function App() {
                   </section>
                 </div>
               )}
+            </fieldset>
+
+            <div className="auto-stop-panel">
+              <div className="setting-heading">
+                <strong>Auto stop</strong>
+                <SettingInfo label="Auto stop">
+                  Watches average fine-tuning loss after a five-minute and 12%
+                  warm-up. It stops only when four consecutive loss windows rise
+                  on every reporting device. It saves and verifies a checkpoint
+                  before stopping. Training loss can be noisy, so leave this off
+                  if you prefer to decide from the graph.
+                </SettingInfo>
+              </div>
+              <label className="toggle-row compact">
+                <input
+                  type="checkbox"
+                  checked={
+                    autoStopAvailable &&
+                    (active ? Boolean(active.autoStopEnabled) : form.autoStop)
+                  }
+                  disabled={
+                    !autoStopAvailable ||
+                    autoStopBusy ||
+                    active?.status === "stopping"
+                  }
+                  onChange={(event) =>
+                    void changeAutoStop(event.target.checked)
+                  }
+                />
+                <span>
+                  <b>
+                    {autoStopAvailable &&
+                    (active?.autoStopEnabled || (!active && form.autoStop))
+                      ? "On"
+                      : "Off"}
+                  </b>
+                  <small>
+                    {!autoStopAvailable
+                      ? "Available for fine-tuning runs"
+                      : active?.autoStopMessage ||
+                        "Watch for sustained rising loss"}
+                  </small>
+                </span>
+              </label>
             </div>
 
             <footer className="panel-footer">

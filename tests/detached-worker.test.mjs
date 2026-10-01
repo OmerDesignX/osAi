@@ -170,6 +170,7 @@ test("pause waits for a checkpoint, then resumes the same training process", asy
     sessionDirectory: root,
     logPath: path.join(root, "training.log"),
     command: "node fake-backend.mjs --pause-checkpoint",
+    request: { autoStop: false },
   };
   const job = {
     schemaVersion: 1,
@@ -183,6 +184,7 @@ test("pause waits for a checkpoint, then resumes the same training process", asy
     pausePath: path.join(root, "pause.request"),
     resumePath: path.join(root, "resume.request"),
     checkpointRequestPath: path.join(root, "checkpoint.request"),
+    autoStopPath: path.join(root, "auto-stop.setting"),
     stage: "fine-tuning",
     iterations: 1,
     alignmentIterations: 1,
@@ -198,6 +200,18 @@ test("pause waits for a checkpoint, then resumes the same training process", asy
       statePath,
       (value) => value.status === "running" && value.trainingPercent > 0,
     );
+    await fs.writeFile(job.autoStopPath, "on\n");
+    const enabled = await waitFor(
+      statePath,
+      (value) => value.autoStopEnabled === true,
+    );
+    assert.equal(enabled.request.autoStop, true);
+    await fs.writeFile(job.autoStopPath, "off\n");
+    const disabled = await waitFor(
+      statePath,
+      (value) => value.autoStopEnabled === false,
+    );
+    assert.equal(disabled.request.autoStop, false);
     await fs.writeFile(job.pausePath, "pause\n");
     const paused = await waitFor(
       statePath,
@@ -238,6 +252,76 @@ test("pause waits for a checkpoint, then resumes the same training process", asy
       5_000,
     ).catch(() => undefined);
     processHandle.kill("SIGKILL");
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  }
+});
+
+test("Auto stop saves a checkpoint before ending a rising-loss trainer", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "osai-worker-auto-stop-"),
+  );
+  const worker = path.resolve("dist-electron/main/training-worker.js");
+  const clock = path.resolve("tests/fixtures/fast-clock.cjs");
+  const backend = path.resolve("tests/fixtures/fake-backend.mjs");
+  const statePath = path.join(root, "state.json");
+  const jobPath = path.join(root, "job.json");
+  const id = "77777777-7777-4777-8777-777777777777";
+  const now = new Date().toISOString();
+  const state = {
+    schemaVersion: 1,
+    id,
+    name: "auto-stop",
+    status: "queued",
+    phase: "preparing",
+    progress: 0,
+    indeterminate: true,
+    autoStopEnabled: true,
+    message: "queued",
+    createdAt: now,
+    sessionDirectory: root,
+    logPath: path.join(root, "training.log"),
+    command: "node fake-backend.mjs --auto-stop",
+  };
+  const job = {
+    schemaVersion: 1,
+    id,
+    executable: process.execPath,
+    args: [backend, "--auto-stop"],
+    sessionDirectory: root,
+    statePath,
+    logPath: state.logPath,
+    stopPath: path.join(root, "stop.request"),
+    checkpointRequestPath: path.join(root, "checkpoint.request"),
+    autoStopPath: path.join(root, "auto-stop.setting"),
+    stage: "fine-tuning",
+    iterations: 1,
+    alignmentIterations: 1,
+    createdAt: now,
+  };
+  await fs.writeFile(statePath, JSON.stringify(state));
+  await fs.writeFile(jobPath, JSON.stringify(job));
+  const handle = spawn(
+    process.execPath,
+    ["--require", clock, worker, jobPath],
+    {
+      stdio: "ignore",
+    },
+  );
+  try {
+    const stopped = await waitFor(
+      statePath,
+      (value) => value.status === "stopped",
+    );
+    assert.equal(stopped.checkpointStatus, "saved");
+    assert.match(stopped.message, /Auto stop saved a checkpoint/);
+    assert.equal((await fs.stat(stopped.checkpointPath)).size > 0, true);
+  } finally {
+    handle.kill("SIGKILL");
     await fs.rm(root, {
       recursive: true,
       force: true,
