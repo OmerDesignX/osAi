@@ -41,6 +41,7 @@ let fineTuneProgress: FineTuneProgressParser;
 let lastCheckpointRequest = "";
 let metricWrites = Promise.resolve();
 let mlxMetricTable = false;
+let lastTrainingStep: number | null = null;
 const lastMetric = new Map<string, { at: number; percent: number }>();
 const lossRise = new LossRiseDetector();
 
@@ -150,6 +151,7 @@ function consumeLine(raw: string) {
         {
           time: state.checkpointSavedAt,
           percent: state.trainingPercent ?? 0,
+          step: lastTrainingStep,
           device: "Trainer",
           loss: null,
           lossUncertainty: null,
@@ -374,6 +376,8 @@ function consumeLine(raw: string) {
   if (state.phase === "fine-tuning" && state.trainingPercent !== undefined) {
     const metric = lossMetric(line, state.trainingPercent, mlxMetricTable);
     if (metric) {
+      if (metric.step !== null && metric.step !== undefined)
+        lastTrainingStep = Math.max(lastTrainingStep ?? 0, metric.step);
       recordMetric(metric);
       if (state.status === "running") {
         const rise = lossRise.observe(metric);

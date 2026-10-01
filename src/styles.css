@@ -2744,6 +2744,39 @@ select:disabled {
   font-size: 11px;
 }
 
+.loss-axis-tabs {
+  display: flex;
+  gap: 3px;
+  align-self: flex-start;
+  margin: 2px 0 9px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+
+.loss-axis-tabs button {
+  min-width: 70px;
+  min-height: 27px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.loss-axis-tabs button:hover,
+.loss-axis-tabs button:focus-visible {
+  color: var(--text);
+}
+
+.loss-axis-tabs button.active {
+  background: var(--control-selected);
+  color: var(--accent);
+}
+
 .loss-chart-shell {
   min-width: 0;
   min-height: 0;
@@ -2780,6 +2813,10 @@ select:disabled {
     monospace;
 }
 
+.loss-chart-axis-title {
+  font-size: 11px;
+}
+
 .loss-chart-checkpoint {
   stroke: var(--success);
   stroke-width: 1.5;
@@ -2808,7 +2845,10 @@ select:disabled {
 }
 
 .loss-chart-legend i.checkpoint-key {
-  background: var(--success);
+  height: 10px;
+  border-left: 2px dashed var(--success);
+  border-radius: 0;
+  background: transparent;
 }
 
 .loss-chart-empty {

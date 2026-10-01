@@ -162,6 +162,7 @@ export type SessionState = {
 export type TrainingMetric = {
   time: string;
   percent: number;
+  step?: number | null;
   device: string;
   loss: number | null;
   lossUncertainty: number | null;

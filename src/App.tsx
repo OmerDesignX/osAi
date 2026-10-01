@@ -36,7 +36,7 @@ import {
 } from "./lora-guidance.js";
 import { DataEditor } from "./DataEditor.js";
 import { TrainingWiki } from "./TrainingWiki.js";
-import { LossChart } from "./LossChart.js";
+import { LossChart, type LossAxis } from "./LossChart.js";
 
 type IconName = keyof typeof feather.icons;
 
@@ -400,6 +400,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState("");
   const [log, setLog] = useState("");
   const [metrics, setMetrics] = useState<TrainingMetric[]>([]);
+  const [lossAxis, setLossAxis] = useState<LossAxis>("progress");
   const [backend, setBackend] = useState<BackendStatus | null>(null);
   const [backendChecking, setBackendChecking] = useState(false);
   const [backendInstall, setBackendInstall] = useState(fallbackBackendInstall);
@@ -3226,8 +3227,32 @@ export function App() {
                         <Icon name="download" size={14} /> Save CSV
                       </button>
                     </div>
+                    <div
+                      className="loss-axis-tabs"
+                      role="tablist"
+                      aria-label="Loss chart horizontal axis"
+                    >
+                      {(
+                        [
+                          ["progress", "Progress"],
+                          ["time", "Time"],
+                          ["steps", "Steps"],
+                        ] as const
+                      ).map(([axis, label]) => (
+                        <button
+                          key={axis}
+                          type="button"
+                          role="tab"
+                          aria-selected={lossAxis === axis}
+                          className={lossAxis === axis ? "active" : ""}
+                          onClick={() => setLossAxis(axis)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                     <div className="loss-chart-shell">
-                      <LossChart metrics={metrics} />
+                      <LossChart metrics={metrics} axis={lossAxis} />
                     </div>
                   </section>
                 </div>

@@ -1534,6 +1534,7 @@ export class SessionService {
         steps: number;
         mlxTable: boolean;
         percent: number;
+        lastStep?: number | null;
         last: Record<string, number>;
       };
       const cursor = await fs
@@ -1544,11 +1545,13 @@ export class SessionService {
           steps: 0,
           mlxTable: false,
           percent: 0,
+          lastStep: null,
           last: {},
         }));
       if (cursor.offset > stat.size) {
         cursor.offset = 0;
         cursor.last = {};
+        cursor.lastStep = null;
         await fs.writeFile(file, metricHeader, { mode: 0o600 });
       } else if (!(await fs.stat(file).catch(() => null))) {
         await fs.writeFile(file, metricHeader, { mode: 0o600 });
@@ -1572,6 +1575,8 @@ export class SessionService {
         const mlx = cursor.mlxTable
           ? /^\s*(\d[\d,]*)\s+([\d.eE+-]+)\s/.exec(line)
           : null;
+        if (data) cursor.lastStep = Number(data[1]);
+        else if (mlx) cursor.lastStep = Number(mlx[1].replaceAll(",", ""));
         if (data && Number(data[2]) > 0)
           cursor.percent = Math.min(
             100,
@@ -1587,6 +1592,7 @@ export class SessionService {
           output += metricRow({
             time: "",
             percent: cursor.percent,
+            step: cursor.lastStep ?? null,
             device: "Trainer",
             loss: null,
             lossUncertainty: null,

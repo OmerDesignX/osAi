@@ -16,7 +16,17 @@ test("records Unicode loss statistics and checkpoint-ready CSV rows", () => {
   assert.equal(metric.lossUncertainty, 0.06031);
   assert.equal(metric.accuracy, 84.38);
   assert.equal(metric.accuracyUncertainty, 1.4);
+  assert.equal(metric.step, 43);
   assert.deepEqual(parseMetricRow(metricRow(metric).trim()), metric);
+});
+
+test("records MLX iteration and reads older metrics without step data", () => {
+  const mlx = lossMetric(" 1 2.45 110.2 512", 10, true);
+  assert.equal(mlx?.step, 1);
+  const legacy = parseMetricRow(
+    "2026-09-30T00:00:00.000Z,10,CUDA0,0.5,,,80,loss",
+  );
+  assert.equal(legacy?.step, null);
 });
 
 test("reads older replacement glyphs in a training log", () => {

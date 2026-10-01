@@ -243,7 +243,7 @@ test("pause waits for a checkpoint, then resumes the same training process", asy
     assert.equal(complete.progress, 100);
     const history = await fs.readFile(path.join(root, "metrics.csv"), "utf8");
     assert.match(history, /checkpoint/);
-    assert.match(history, /,loss\n/);
+    assert.match(history, /,loss,\d+\n/);
   } finally {
     await fs.writeFile(job.stopPath, "stop\n").catch(() => undefined);
     await waitFor(

@@ -46,6 +46,9 @@ test("an older session gains compact loss history from its complete log", async 
       1,
     );
     assert.equal(first[2].percent, 20);
+    assert.equal(first[0].step, 1);
+    assert.equal(first[1].step, 20);
+    assert.equal(first[2].step, 20);
     await fs.appendFile(
       logPath,
       "[CUDA0] train: data=50/100 loss=0.7±0.1 acc=80±2%\n",

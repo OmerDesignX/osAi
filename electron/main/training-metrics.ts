@@ -1,6 +1,7 @@
 export type TrainingMetric = {
   time: string;
   percent: number;
+  step?: number | null;
   device: string;
   loss: number | null;
   lossUncertainty: number | null;
@@ -10,7 +11,7 @@ export type TrainingMetric = {
 };
 
 export const metricHeader =
-  "time,training_percent,device,loss,loss_uncertainty,accuracy_percent,accuracy_uncertainty_percent,event\n";
+  "time,training_percent,device,loss,loss_uncertainty,accuracy_percent,accuracy_uncertainty_percent,event,training_step\n";
 
 function finite(value: string | undefined) {
   if (!value) return null;
@@ -28,9 +29,16 @@ export function lossMetric(
   const value = finite(loss?.[1] ?? mlx?.[1]);
   if (value === null || percent < 0 || percent > 100) return null;
   const accuracy = /\bacc=([\d.eE+-]+)(?:[±\uFFFD]([\d.eE+-]+))?%?/i.exec(raw);
+  const stepText =
+    /\bdata\s*=\s*([\d,]+)\s*\//i.exec(raw)?.[1] ||
+    (mlxTable ? /^\s*(\d[\d,]*)\s+/.exec(raw)?.[1] : undefined) ||
+    /\b(?:iter|iteration)\s*[=:]?\s*([\d,]+)/i.exec(raw)?.[1];
+  const step = stepText ? Number(stepText.replaceAll(",", "")) : null;
   return {
     time: new Date().toISOString(),
     percent,
+    step:
+      step !== null && Number.isSafeInteger(step) && step >= 0 ? step : null,
     device: /^\[([^\]]+)\]/.exec(raw)?.[1] || "Trainer",
     loss: value,
     lossUncertainty: finite(loss?.[2]),
@@ -51,19 +59,26 @@ export function metricRow(metric: TrainingMetric) {
       metric.accuracy ?? "",
       metric.accuracyUncertainty ?? "",
       metric.event,
+      metric.step ?? "",
     ].join(",") + "\n"
   );
 }
 
 export function parseMetricRow(raw: string): TrainingMetric | null {
   const fields = raw.split(",");
-  if (fields.length !== 8 || !["loss", "checkpoint"].includes(fields[7]))
+  if (
+    ![8, 9].includes(fields.length) ||
+    !["loss", "checkpoint"].includes(fields[7])
+  )
     return null;
   const percent = Number(fields[1]);
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) return null;
+  const step = fields.length === 9 && fields[8] ? Number(fields[8]) : null;
+  if (step !== null && (!Number.isSafeInteger(step) || step < 0)) return null;
   return {
     time: fields[0],
     percent,
+    step,
     device: fields[2],
     loss: finite(fields[3]),
     lossUncertainty: finite(fields[4]),
