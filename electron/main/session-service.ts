@@ -10,6 +10,13 @@ import {
   recoverFineTuneProgress,
   type TrainingStage,
 } from "./training-progress.js";
+import {
+  lossMetric,
+  metricHeader,
+  metricRow,
+  parseMetricRow,
+  type TrainingMetric,
+} from "./training-metrics.js";
 import type {
   BackendStatus,
   Preferences,
@@ -18,7 +25,13 @@ import type {
   WorkerJob,
 } from "../types.js";
 
-const activeStatuses = new Set(["queued", "running", "paused", "stopping"]);
+const activeStatuses = new Set([
+  "queued",
+  "running",
+  "pausing",
+  "paused",
+  "stopping",
+]);
 const BACKEND_STATUS_TIMEOUT_MS = 5_000;
 const BACKEND_STATUS_OUTPUT_LIMIT = 8 * 1024;
 const alignmentTypes = new Set([
@@ -108,6 +121,10 @@ async function recoverVisibleProgress(state: SessionState) {
     ...state,
     phase: "fine-tuning" as const,
     progress,
+    trainingPercent: Math.min(
+      100,
+      (100 * recovered.completed) / recovered.total,
+    ),
     indeterminate: false,
     message:
       state.status === "paused"
@@ -289,6 +306,8 @@ export function absolutizeDatasetMedia(
 
 export function formatTerminalOutput(value: string) {
   const withoutControls = value
+    // Older Windows worker pipes may have decoded the native ± byte as U+FFFD.
+    .replace(/\b(loss|acc)=([0-9.eE+-]+)\uFFFD(?=[0-9])/gi, "$1=$2±")
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\u0008/g, "");
@@ -915,6 +934,7 @@ async function waitForSessionStatus(
   while (Date.now() - started < timeout) {
     const state = await readState(file);
     if (state?.status === expected) return state;
+    if (expected === "pausing" && state?.status === "paused") return state;
     if (state && !activeStatuses.has(state.status)) return state;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -1012,6 +1032,8 @@ export async function prepareSharedFineTuneData(
 }
 
 export class SessionService {
+  private readonly metricImports = new Map<string, Promise<void>>();
+
   constructor(
     private readonly legacySessionsRoot: string,
     private readonly workerScript: string,
@@ -1379,7 +1401,7 @@ export class SessionService {
     const job = JSON.parse(
       await fs.readFile(path.join(state.sessionDirectory, "job.json"), "utf8"),
     ) as WorkerJob;
-    if (!job.pausePath || !job.resumePath)
+    if (!job.pausePath || !job.resumePath || !job.checkpointRequestPath)
       throw new Error(
         "Pause is available for sessions started by this version of osAi",
       );
@@ -1387,9 +1409,14 @@ export class SessionService {
     const opposite = action === "pause" ? job.resumePath : job.pausePath;
     await fs.rm(opposite, { force: true });
     await fs.writeFile(request, `${action}\n`, { mode: 0o600 });
+    if (action === "pause")
+      return waitForSessionStatus(
+        path.join(state.sessionDirectory, "state.json"),
+        "pausing",
+      );
     return waitForSessionStatus(
       path.join(state.sessionDirectory, "state.json"),
-      action === "pause" ? "paused" : "running",
+      "running",
     );
   }
 
@@ -1435,6 +1462,133 @@ export class SessionService {
     } finally {
       await handle.close();
     }
+  }
+
+  async metrics(id: string): Promise<TrainingMetric[]> {
+    const state = await this.find(id);
+    const file = path.join(state.sessionDirectory, "metrics.csv");
+    await this.importLegacyMetrics(state);
+    if (!(await fs.stat(file).catch(() => null))) return [];
+    const lines = readline.createInterface({
+      input: createReadStream(file, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+    let metrics: TrainingMetric[] = [];
+    for await (const line of lines) {
+      const metric = parseMetricRow(line);
+      if (!metric) continue;
+      metrics.push(metric);
+      if (metrics.length > 4_000)
+        metrics = metrics.filter(
+          (entry, index) => entry.event === "checkpoint" || index % 2 === 0,
+        );
+    }
+    return metrics;
+  }
+
+  private async importLegacyMetrics(state: SessionState) {
+    const directory = state.sessionDirectory;
+    const file = path.join(directory, "metrics.csv");
+    const cursorFile = path.join(directory, "metrics-import.json");
+    if (
+      (await fs.stat(file).catch(() => null)) &&
+      !(await fs.stat(cursorFile).catch(() => null))
+    )
+      return; // New workers write their own compact metric stream.
+    const prior = this.metricImports.get(directory);
+    if (prior) return prior;
+    const importTask = (async () => {
+      const log = path.join(directory, "training.log");
+      const stat = await fs.stat(log).catch(() => null);
+      if (!stat?.size) return;
+      type Cursor = {
+        offset: number;
+        steps: number;
+        mlxTable: boolean;
+        percent: number;
+        last: Record<string, number>;
+      };
+      const cursor = await fs
+        .readFile(cursorFile, "utf8")
+        .then((raw) => JSON.parse(raw) as Cursor)
+        .catch((): Cursor => ({
+          offset: 0,
+          steps: 0,
+          mlxTable: false,
+          percent: 0,
+          last: {},
+        }));
+      if (cursor.offset > stat.size) {
+        cursor.offset = 0;
+        cursor.last = {};
+        await fs.writeFile(file, metricHeader, { mode: 0o600 });
+      } else if (!(await fs.stat(file).catch(() => null))) {
+        await fs.writeFile(file, metricHeader, { mode: 0o600 });
+      }
+      if (cursor.offset === stat.size) return;
+      const lines = readline.createInterface({
+        input: createReadStream(log, {
+          start: cursor.offset,
+          end: stat.size - 1,
+          encoding: "utf8",
+        }),
+        crlfDelay: Infinity,
+      });
+      let output = "";
+      for await (const line of lines) {
+        const steps = /\bosai: training plan\b.*?\bsteps=(\d+)/.exec(line);
+        if (steps) cursor.steps = Number(steps[1]);
+        if (/^iter\s+train_loss\s+tok\/s\s+tokens$/i.test(line.trim()))
+          cursor.mlxTable = true;
+        const data = /\bdata=(\d+)\/(\d+)/.exec(line);
+        const mlx = cursor.mlxTable
+          ? /^\s*(\d[\d,]*)\s+([\d.eE+-]+)\s/.exec(line)
+          : null;
+        if (data && Number(data[2]) > 0)
+          cursor.percent = Math.min(
+            100,
+            (100 * Number(data[1])) / Number(data[2]),
+          );
+        else if (mlx && cursor.steps > 0)
+          cursor.percent = Math.min(
+            100,
+            (100 * Number(mlx[1].replaceAll(",", ""))) / cursor.steps,
+          );
+        const checkpoint = /osai: checkpoint saved\b/i.test(line);
+        if (checkpoint) {
+          output += metricRow({
+            time: "",
+            percent: cursor.percent,
+            device: "Trainer",
+            loss: null,
+            lossUncertainty: null,
+            accuracy: null,
+            accuracyUncertainty: null,
+            event: "checkpoint",
+          });
+        } else if (data || mlx || /^\s*Iter\s+\d+/i.test(line)) {
+          const metric = lossMetric(line, cursor.percent, cursor.mlxTable);
+          if (metric) {
+            const previous = cursor.last[metric.device];
+            if (previous === undefined || metric.percent - previous >= 0.1) {
+              cursor.last[metric.device] = metric.percent;
+              output += metricRow({ ...metric, time: "" });
+            }
+          }
+        }
+        if (output.length >= 32 * 1024) {
+          await fs.appendFile(file, output, "utf8");
+          output = "";
+        }
+      }
+      if (output) await fs.appendFile(file, output, "utf8");
+      cursor.offset = stat.size;
+      const pending = `${cursorFile}.${process.pid}.pending`;
+      await fs.writeFile(pending, JSON.stringify(cursor), { mode: 0o600 });
+      await fs.rename(pending, cursorFile);
+    })().finally(() => this.metricImports.delete(directory));
+    this.metricImports.set(directory, importTask);
+    return importTask;
   }
 
   async root() {

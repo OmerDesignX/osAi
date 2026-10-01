@@ -44,6 +44,9 @@ const bridge: OsAiBridge = {
   deleteSession: (id: string) => ipcRenderer.invoke("training:delete", id),
   listSessions: () => ipcRenderer.invoke("training:list"),
   sessionLog: (id: string) => ipcRenderer.invoke("training:log", id),
+  sessionMetrics: (id: string) => ipcRenderer.invoke("training:metrics", id),
+  exportSessionMetrics: (id: string) =>
+    ipcRenderer.invoke("training:metrics-export", id),
   sessionArtifacts: (id: string) =>
     ipcRenderer.invoke("training:artifacts", id),
   openSessionArtifacts: (id: string) =>

@@ -37,7 +37,7 @@ test("the app packages a CLI download manifest without backend binaries", async 
     await fs.readFile(path.join(root, "releaseScripts", "backend-source.json")),
   );
   assert.equal(configuration.ref, "main");
-  assert.equal(configuration.revision, "0.1.4");
+  assert.equal(configuration.revision, "0.1.5");
   assert.equal(
     configuration.archive,
     `https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/${configuration.ref}`,

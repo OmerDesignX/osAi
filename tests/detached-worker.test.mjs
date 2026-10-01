@@ -149,6 +149,104 @@ test("a completed checkpoint request remains saved after worker polling", async 
   }
 });
 
+test("pause waits for a checkpoint, then resumes the same training process", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-pause-"));
+  const worker = path.resolve("dist-electron/main/training-worker.js");
+  const backend = path.resolve("tests/fixtures/fake-backend.mjs");
+  const statePath = path.join(root, "state.json");
+  const jobPath = path.join(root, "job.json");
+  const now = new Date().toISOString();
+  const id = "88888888-8888-4888-8888-888888888888";
+  const state = {
+    schemaVersion: 1,
+    id,
+    name: "pause-resume",
+    status: "queued",
+    phase: "preparing",
+    progress: 0,
+    indeterminate: true,
+    message: "queued",
+    createdAt: now,
+    sessionDirectory: root,
+    logPath: path.join(root, "training.log"),
+    command: "node fake-backend.mjs --pause-checkpoint",
+  };
+  const job = {
+    schemaVersion: 1,
+    id,
+    executable: process.execPath,
+    args: [backend, "--pause-checkpoint", "--nested-trainer"],
+    sessionDirectory: root,
+    statePath,
+    logPath: state.logPath,
+    stopPath: path.join(root, "stop.request"),
+    pausePath: path.join(root, "pause.request"),
+    resumePath: path.join(root, "resume.request"),
+    checkpointRequestPath: path.join(root, "checkpoint.request"),
+    stage: "fine-tuning",
+    iterations: 1,
+    alignmentIterations: 1,
+    createdAt: now,
+  };
+  await fs.writeFile(statePath, JSON.stringify(state));
+  await fs.writeFile(jobPath, JSON.stringify(job));
+  const processHandle = spawn(process.execPath, [worker, jobPath], {
+    stdio: "ignore",
+  });
+  try {
+    await waitFor(
+      statePath,
+      (value) => value.status === "running" && value.trainingPercent > 0,
+    );
+    await fs.writeFile(job.pausePath, "pause\n");
+    const paused = await waitFor(
+      statePath,
+      (value) =>
+        value.status === "paused" || value.checkpointStatus === "failed",
+    );
+    assert.equal(paused.status, "paused", paused.error);
+    assert.equal(paused.checkpointStatus, "saved");
+    assert.equal((await fs.stat(paused.checkpointPath)).size > 0, true);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const stillPaused = JSON.parse(await fs.readFile(statePath, "utf8"));
+    assert.equal(stillPaused.status, "paused");
+    assert.equal(stillPaused.trainingPercent, paused.trainingPercent);
+    const heartbeat = path.join(root, "nested-heartbeat.txt");
+    const heartbeatSize = (await fs.stat(heartbeat)).size;
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    assert.equal((await fs.stat(heartbeat)).size, heartbeatSize);
+    await fs.writeFile(job.resumePath, "resume\n");
+    await waitFor(
+      statePath,
+      (value) =>
+        value.status === "running" &&
+        value.trainingPercent > paused.trainingPercent,
+    );
+    const complete = await waitFor(
+      statePath,
+      (value) => value.status === "completed",
+    );
+    assert.equal(complete.progress, 100);
+    const history = await fs.readFile(path.join(root, "metrics.csv"), "utf8");
+    assert.match(history, /checkpoint/);
+    assert.match(history, /,loss\n/);
+  } finally {
+    await fs.writeFile(job.stopPath, "stop\n").catch(() => undefined);
+    await waitFor(
+      statePath,
+      (value) => ["stopped", "completed", "failed"].includes(value.status),
+      5_000,
+    ).catch(() => undefined);
+    processHandle.kill("SIGKILL");
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  }
+});
+
 test("MLX table iterations advance against the announced optimizer steps", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-mlx-"));
   const worker = path.resolve("dist-electron/main/training-worker.js");
@@ -203,7 +301,12 @@ test("MLX table iterations advance against the announced optimizer steps", async
     await waitFor(statePath, (value) => value.status === "completed");
   } finally {
     processHandle.kill("SIGKILL");
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
   }
 });
 
@@ -373,7 +476,7 @@ test("a detached training worker stops only after an explicit stop request", asy
   }
 });
 
-test("a detached training worker pauses, resumes, and then stops", async () => {
+test("a checkpoint-paused worker can be stopped cleanly", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-pause-"));
   const worker = path.resolve("dist-electron/main/training-worker.js");
   const backend = path.resolve("tests/fixtures/fake-backend.mjs");
@@ -402,13 +505,14 @@ test("a detached training worker pauses, resumes, and then stops", async () => {
     schemaVersion: 1,
     id,
     executable: process.execPath,
-    args: [backend, "--long"],
+    args: [backend, "--pause-checkpoint"],
     sessionDirectory: root,
     statePath,
     logPath: state.logPath,
     stopPath,
     pausePath,
     resumePath,
+    checkpointRequestPath: path.join(root, "checkpoint.request"),
     stage: "fine-tuning",
     iterations: 2,
     alignmentIterations: 1,
@@ -420,23 +524,34 @@ test("a detached training worker pauses, resumes, and then stops", async () => {
     stdio: "ignore",
   });
   try {
-    await waitFor(statePath, (value) => value.status === "running");
+    await waitFor(
+      statePath,
+      (value) => value.status === "running" && value.trainingPercent > 0,
+    );
     await fs.writeFile(pausePath, "pause\n");
     const paused = await waitFor(
       statePath,
-      (value) => value.status === "paused",
+      (value) =>
+        value.status === "paused" || value.checkpointStatus === "failed",
     );
+    assert.equal(paused.status, "paused", paused.error);
     assert.equal(paused.indeterminate, false);
-    await fs.writeFile(resumePath, "resume\n");
-    const resumed = await waitFor(
-      statePath,
-      (value) => value.status === "running" && /resumed/i.test(value.message),
-    );
-    assert.match(resumed.message, /resumed/i);
+    assert.equal(paused.checkpointStatus, "saved");
     await fs.writeFile(stopPath, "stop\n");
     await waitFor(statePath, (value) => value.status === "stopped");
   } finally {
+    await fs.writeFile(stopPath, "stop\n").catch(() => undefined);
+    await waitFor(
+      statePath,
+      (value) => ["stopped", "completed", "failed"].includes(value.status),
+      5_000,
+    ).catch(() => undefined);
     processHandle.kill("SIGKILL");
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
   }
 });

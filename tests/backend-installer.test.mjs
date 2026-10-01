@@ -167,7 +167,7 @@ test("managed backends update when the CLI download reference changes", async ()
     archive:
       "https://codeload.github.com/OmerDesignX/osAi-CLI/zip/refs/heads/main",
     ref: "main",
-    revision: "0.1.4",
+    revision: "0.1.5",
   };
   try {
     await fs.mkdir(path.dirname(executable), { recursive: true });

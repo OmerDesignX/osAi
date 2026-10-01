@@ -1,7 +1,56 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 
-if (process.argv.includes("--checkpoint")) {
+if (process.argv.includes("--pause-checkpoint")) {
+  const request = process.env.OSAI_CHECKPOINT_REQUEST;
+  if (process.argv.includes("--nested-trainer")) {
+    const heartbeat = path.join(path.dirname(request), "nested-heartbeat.txt");
+    const nested = spawn(
+      process.execPath,
+      [
+        "-e",
+        "const fs=require('node:fs');setInterval(()=>fs.appendFileSync(process.argv[1],'x'),80)",
+        heartbeat,
+      ],
+      { stdio: "ignore" },
+    );
+    process.on("exit", () => nested.kill());
+  }
+  let savedGeneration = "";
+  let step = 0;
+  process.stdout.write(
+    "osai: training plan examples=20 epochs=1 batch=1 steps=20 optimizer_updates=20\n",
+  );
+  const timer = setInterval(() => {
+    step += 1;
+    process.stdout.write(
+      `train: [###] data=${step}/20 loss=${(1 - step / 40).toFixed(3)}±0.01 acc=50±1%\n`,
+    );
+    const generation = fs.existsSync(request)
+      ? fs.readFileSync(request, "utf8").trim()
+      : "";
+    if (generation && generation !== savedGeneration) {
+      savedGeneration = generation;
+      const output = path.join(
+        path.dirname(request),
+        "outputs",
+        "checkpoint",
+        "adapter",
+        "last.gguf",
+      );
+      fs.mkdirSync(path.dirname(output), { recursive: true });
+      fs.writeFileSync(output, `adapter at ${step}`);
+      process.stdout.write(
+        `osai: checkpoint saved path=${output} generation=${generation}\n`,
+      );
+    }
+    if (step === 20) {
+      clearInterval(timer);
+      process.exit(0);
+    }
+  }, 120);
+} else if (process.argv.includes("--checkpoint")) {
   const request = process.env.OSAI_CHECKPOINT_REQUEST;
   const generation = fs.readFileSync(request, "utf8").trim();
   const output = path.join(
@@ -21,9 +70,7 @@ if (process.argv.includes("--checkpoint")) {
   process.stderr.write("osai: unsupported dataset schema at train.jsonl:1\n");
   process.stderr.write("osai: command exited with status 2; see log\n");
   process.exit(2);
-}
-
-if (process.argv.includes("--auto-retry")) {
+} else if (process.argv.includes("--auto-retry")) {
   process.stdout.write(
     "osai: auto settings profile=maximum budget=10GiB context=1024 batch=4 layers=2 rank=8 threads=8\n",
   );

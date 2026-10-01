@@ -102,7 +102,9 @@ export class FineTuneProgressParser {
     const mlxRow = this.mlxTable
       ? /^(\d[\d,]*)\s+(?:nan|inf|-?(?:\d+(?:\.\d+)?|\.\d+))\b/i.exec(line)
       : null;
-    const match = iteration || trainProgress || mlxRow;
+    // Native progress rows may contain both "epoch 0" and "data=.../...".
+    // The data counter is the actual training position; epoch is not.
+    const match = trainProgress || mlxRow || iteration;
     if (!match) return null;
 
     const completed = count(match[1]);

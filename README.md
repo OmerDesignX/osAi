@@ -234,10 +234,13 @@ Each run receives its own local date-and-time folder. The session view shows pro
 
 - Press a session tab to inspect that run.
 - Press **Save checkpoint** and wait for its saved status before stopping if you need the latest weights.
+- Press **Pause training** to save the adapter at the next safe optimizer step and suspend the running trainer. Resume continues that same process and its in-memory optimizer state. The pause button shows its pending state until the checkpoint is verified.
 - Press **Stop** to end the worker; updates since the last saved checkpoint may be lost.
 - Press **Show files** to reveal the selected session.
 - Press **Open sessions** or the top-bar **Sessions** button to open the complete sessions folder.
 - Closing the App does not stop training. The detached local worker continues until completion or until **Stop** is pressed.
+
+The session stores its selected settings, progress, checkpoint state, log, and a compact `metrics.csv`. The loss graph reads this history when the App reopens; its CSV button exports the metrics. A paused trainer remains resumable while its detached process is alive. A system restart ends that process, and the adapter checkpoint does not contain the native trainer's optimizer state or data cursor for an exact restart.
 
 A completed run contains the same organized output as osAi CLI:
 

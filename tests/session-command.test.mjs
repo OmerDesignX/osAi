@@ -139,6 +139,13 @@ test("renders carriage-return terminal progress as one current line", () => {
   assert.doesNotMatch(output, /config\.json|\x1b/);
 });
 
+test("repairs the old Windows replacement glyph between loss statistics", () => {
+  assert.equal(
+    formatTerminalOutput("train: loss=0.51406�0.06031 acc=84.38�1.40%"),
+    "train: loss=0.51406±0.06031 acc=84.38±1.40%",
+  );
+});
+
 test("restores settings from sessions created by earlier app builds", () => {
   const sessionDirectory = path.join(
     os.homedir(),

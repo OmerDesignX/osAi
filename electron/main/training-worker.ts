@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { SessionState, WorkerJob } from "../types.js";
 import { backendRuntimeEnvironment } from "./backend-source.js";
 import {
@@ -9,6 +11,12 @@ import {
   FineTuneProgressParser,
   phaseProgress,
 } from "./training-progress.js";
+import {
+  lossMetric,
+  metricHeader,
+  metricRow,
+  type TrainingMetric,
+} from "./training-metrics.js";
 
 const jobPath = process.argv[2];
 if (!jobPath || !path.isAbsolute(jobPath)) process.exit(2);
@@ -18,6 +26,7 @@ let job: WorkerJob;
 let child: ChildProcess | null = null;
 let stopping = false;
 let paused = false;
+let pauseGeneration = "";
 let pausedIndeterminate = false;
 let finalised = false;
 let lastStderrLine = "";
@@ -27,6 +36,29 @@ let writeTimer: ReturnType<typeof setTimeout> | null = null;
 let writeChain = Promise.resolve();
 let fineTuneProgress: FineTuneProgressParser;
 let lastCheckpointRequest = "";
+let metricWrites = Promise.resolve();
+let mlxMetricTable = false;
+const lastMetric = new Map<string, { at: number; percent: number }>();
+
+function recordMetric(metric: TrainingMetric, force = false) {
+  const previous = lastMetric.get(metric.device);
+  const now = Date.now();
+  if (
+    !force &&
+    previous &&
+    now - previous.at < 15_000 &&
+    metric.percent - previous.percent < 10
+  )
+    return;
+  lastMetric.set(metric.device, { at: now, percent: metric.percent });
+  const file = path.join(job.sessionDirectory, "metrics.csv");
+  metricWrites = metricWrites
+    .catch(() => undefined)
+    .then(() => fs.appendFile(file, metricRow(metric), { encoding: "utf8" }));
+  void metricWrites.catch((error) =>
+    console.error("osAi metric write failed:", error),
+  );
+}
 
 async function atomicStateWrite() {
   const snapshot = JSON.stringify(state, null, 2);
@@ -56,8 +88,14 @@ async function atomicStateWrite() {
 }
 
 function scheduleStateWrite(immediate = false) {
-  if (writeTimer) clearTimeout(writeTimer);
-  if (immediate) return atomicStateWrite();
+  if (immediate) {
+    if (writeTimer) clearTimeout(writeTimer);
+    writeTimer = null;
+    return atomicStateWrite();
+  }
+  // Throttle while output is streaming. Debouncing from the last line made a
+  // continuously busy trainer appear stuck at its initial percentage.
+  if (writeTimer) return Promise.resolve();
   writeTimer = setTimeout(() => {
     writeTimer = null;
     void atomicStateWrite().catch((error) => {
@@ -90,7 +128,22 @@ function consumeLine(raw: string) {
       state.checkpointStatus = "saved";
       state.checkpointSavedAt = new Date().toISOString();
       state.checkpointPath = savedPath;
+      recordMetric(
+        {
+          time: state.checkpointSavedAt,
+          percent: state.trainingPercent ?? 0,
+          device: "Trainer",
+          loss: null,
+          lossUncertainty: null,
+          accuracy: null,
+          accuracyUncertainty: null,
+          event: "checkpoint",
+        },
+        true,
+      );
       void scheduleStateWrite(true);
+      if (pauseGeneration && checkpoint[2] === pauseGeneration)
+        void completePause(savedPath);
     }
     return;
   }
@@ -106,6 +159,11 @@ function consumeLine(raw: string) {
   }
   if (/osai: checkpoint failed\b/i.test(line)) {
     state.checkpointStatus = "failed";
+    if (pauseGeneration) {
+      pauseGeneration = "";
+      state.status = "running";
+      state.message = "Pause could not save a checkpoint; training continues";
+    }
     void scheduleStateWrite(true);
     return;
   }
@@ -113,6 +171,7 @@ function consumeLine(raw: string) {
     const records = /\brecords=(\d+)/.exec(line)?.[1];
     state.phase = "preparing";
     state.indeterminate = true;
+    state.trainingPercent = undefined;
     state.message = records
       ? `Scanning ${Number(records).toLocaleString()} records for maximum context`
       : "Scanning the selected dataset for maximum context";
@@ -123,6 +182,7 @@ function consumeLine(raw: string) {
     const split = /\bsplit=(\w+)/.exec(line)?.[1] || "training";
     state.phase = "preparing";
     state.indeterminate = true;
+    state.trainingPercent = undefined;
     state.message = `Converting and merging ${split} dataset files locally`;
     void scheduleStateWrite();
     return;
@@ -171,6 +231,7 @@ function consumeLine(raw: string) {
     const windows = /\bwindows=(\d+)/.exec(line)?.[1];
     state.phase = "fine-tuning";
     state.indeterminate = true;
+    state.trainingPercent = undefined;
     state.message = windows
       ? `Preparing ${Number(windows).toLocaleString()} training windows`
       : "Preparing training windows and optimizer steps";
@@ -185,6 +246,7 @@ function consumeLine(raw: string) {
     const [, engine, attempt, previous, next, oldBatch, newBatch] = retry;
     state.phase = "fine-tuning";
     state.indeterminate = true;
+    state.trainingPercent = undefined;
     state.adjustment = `Attempt ${attempt} · ${engine} · context ${previous} → ${next} · batch ${oldBatch} → ${newBatch}`;
     if (state.autoSettingsSummary) {
       state.autoSettingsSummary = state.autoSettingsSummary
@@ -203,11 +265,14 @@ function consumeLine(raw: string) {
   if (attempt) {
     state.phase = "fine-tuning";
     state.indeterminate = true;
+    state.trainingPercent = undefined;
     state.message = `Preparing ${attempt[1]} training attempt ${attempt[2]} with ${attempt[3]} token windows`;
     void scheduleStateWrite();
     return;
   }
   const lower = line.toLowerCase();
+  if (/^iter\s+train_loss\s+tok\/s\s+tokens$/i.test(line))
+    mlxMetricTable = true;
   const percent = /(?:^|\s)(\d{1,3})%(?:\s|$)/.exec(line);
   const byteProgress =
     /\b\d+(?:\.\d+)?(?:B|KiB|MiB|GiB)\s*\/\s*\d+(?:\.\d+)?(?:B|KiB|MiB|GiB)\b/i.exec(
@@ -241,6 +306,10 @@ function consumeLine(raw: string) {
       const completed = Number(alignment[1]);
       state.phase = "alignment";
       state.indeterminate = false;
+      state.trainingPercent = Math.min(
+        100,
+        (100 * completed) / Math.max(1, job.alignmentIterations),
+      );
       state.progress = clamp(
         phaseProgress(
           completed,
@@ -254,6 +323,10 @@ function consumeLine(raw: string) {
       const { completed, total } = training;
       state.phase = "fine-tuning";
       state.indeterminate = false;
+      state.trainingPercent = Math.min(
+        100,
+        (100 * completed) / Math.max(1, total),
+      );
       state.progress = clamp(
         phaseProgress(completed, total, "fine-tuning", job.stage),
       );
@@ -266,9 +339,14 @@ function consumeLine(raw: string) {
     } else if (lower.includes("publish") || lower.includes("fusion")) {
       state.phase = "publishing";
       state.indeterminate = true;
+      state.trainingPercent = undefined;
       state.progress = clamp(98);
       state.message = "Publishing the adapter and final model outputs";
     }
+  }
+  if (state.phase === "fine-tuning" && state.trainingPercent !== undefined) {
+    const metric = lossMetric(line, state.trainingPercent, mlxMetricTable);
+    if (metric) recordMetric(metric);
   }
   void scheduleStateWrite();
 }
@@ -295,8 +373,9 @@ function consumeStderrLine(raw: string) {
 
 function lineReader(consume: (line: string) => void) {
   let pending = "";
+  const decoder = new StringDecoder("utf8");
   return (chunk: Buffer) => {
-    pending += chunk.toString("utf8");
+    pending += decoder.write(chunk);
     const lines = pending.split(/\r\n|\r|\n/);
     pending = lines.pop() || "";
     for (const line of lines) consume(line);
@@ -309,21 +388,40 @@ async function runWindowsProcessControl(command: "Suspend" | "Resume") {
     command === "Suspend" ? "NtSuspendProcess" : "NtResumeProcess";
   const script = [
     'Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public static class OsAiNativeProcessControl { [DllImport("ntdll.dll")] public static extern uint NtSuspendProcess(IntPtr handle); [DllImport("ntdll.dll")] public static extern uint NtResumeProcess(IntPtr handle); }\'',
-    `$target = Get-Process -Id ${child.pid} -ErrorAction Stop`,
-    `$status = [OsAiNativeProcessControl]::${nativeMethod}($target.Handle)`,
-    "if ($status -ne 0) { exit 1 }",
-  ].join("; ");
+    `$rootPid = ${child.pid}`,
+    "$inventory = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId -ErrorAction Stop)",
+    "$targets = [System.Collections.Generic.List[int]]::new()",
+    "$targets.Add($rootPid)",
+    "for ($i = 0; $i -lt $targets.Count; $i++) { foreach ($item in $inventory) { if ($item.ParentProcessId -eq $targets[$i] -and -not $targets.Contains([int]$item.ProcessId)) { $targets.Add([int]$item.ProcessId) } } }",
+    "$ordered = @($targets.ToArray())",
+    ...(command === "Suspend" ? ["[array]::Reverse($ordered)"] : []),
+    "$applied = [System.Collections.Generic.List[int]]::new()",
+    "try { foreach ($pidValue in $ordered) { $target = Get-Process -Id $pidValue -ErrorAction SilentlyContinue; if ($target) { $status = [OsAiNativeProcessControl]::" +
+      nativeMethod +
+      '($target.Handle); if ($status -ne 0) { throw "process control failed: $pidValue" }; $applied.Add($pidValue) } } }',
+    ...(command === "Suspend"
+      ? [
+          "catch { foreach ($pidValue in $applied) { $target = Get-Process -Id $pidValue -ErrorAction SilentlyContinue; if ($target) { [void][OsAiNativeProcessControl]::NtResumeProcess($target.Handle) } }; exit 1 }",
+        ]
+      : ["catch { exit 1 }"]),
+  ].join("\n");
   const control = spawn(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", script],
-    { windowsHide: true, stdio: "ignore" },
+    { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] },
   );
+  let detail = "";
+  control.stderr?.on("data", (chunk: Buffer) => {
+    detail = (detail + chunk.toString("utf8")).slice(-500);
+  });
   const code = await new Promise<number | null>((resolve, reject) => {
     control.once("error", reject);
     control.once("close", resolve);
   });
   if (code !== 0)
-    throw new Error(`Windows could not ${command.toLowerCase()} training`);
+    throw new Error(
+      `Windows could not ${command.toLowerCase()} training${detail.trim() ? `: ${detail.trim()}` : ""}`,
+    );
 }
 
 async function setChildPaused(shouldPause: boolean) {
@@ -340,15 +438,49 @@ async function setChildPaused(shouldPause: boolean) {
   }
 }
 
-async function pauseTraining() {
-  if (paused || stopping || !child?.pid) return;
-  pausedIndeterminate = state.indeterminate;
-  await setChildPaused(true);
-  paused = true;
-  state.status = "paused";
-  state.indeterminate = false;
-  state.message = "Training paused";
+async function requestPause() {
+  if (paused || pauseGeneration || stopping || !child?.pid) return;
+  if (!job.checkpointRequestPath)
+    throw new Error("This session cannot save a checkpoint before pausing");
+  pauseGeneration = randomUUID();
+  const pending = `${job.checkpointRequestPath}.${process.pid}.pending`;
+  try {
+    await fs.writeFile(pending, `${pauseGeneration}\n`, { mode: 0o600 });
+    await fs.rename(pending, job.checkpointRequestPath);
+  } catch (error) {
+    pauseGeneration = "";
+    await fs.rm(pending, { force: true }).catch(() => undefined);
+    throw error;
+  }
+  state.status = "pausing";
+  state.checkpointStatus = "requested";
+  state.message = "Saving a checkpoint at the next safe training step";
   await scheduleStateWrite(true);
+}
+
+async function completePause(savedPath: string) {
+  if (!pauseGeneration || paused || stopping || !child?.pid) return;
+  try {
+    const snapshot = await fs.stat(savedPath);
+    if (!snapshot.isFile() || snapshot.size === 0)
+      throw new Error("The checkpoint adapter is empty");
+    if (child.exitCode !== null) return;
+    pausedIndeterminate = state.indeterminate;
+    await setChildPaused(true);
+    paused = true;
+    pauseGeneration = "";
+    state.status = "paused";
+    state.indeterminate = false;
+    state.message = "Paused after saving the checkpoint";
+    await scheduleStateWrite(true);
+  } catch (error) {
+    pauseGeneration = "";
+    state.status = "running";
+    state.checkpointStatus = "failed";
+    state.message = "Pause could not verify the checkpoint; training continues";
+    state.error = error instanceof Error ? error.message : String(error);
+    await scheduleStateWrite(true);
+  }
 }
 
 async function resumeTraining() {
@@ -384,7 +516,7 @@ async function checkControlRequests() {
     }
     if (await exists(pausePath)) {
       await fs.rm(pausePath, { force: true });
-      await pauseTraining();
+      await requestPause();
     }
     if (await exists(resumePath)) {
       await fs.rm(resumePath, { force: true });
@@ -415,6 +547,7 @@ async function checkControlRequests() {
 async function terminateTree() {
   if (stopping) return;
   stopping = true;
+  pauseGeneration = "";
   state.status = "stopping";
   state.message = "Stopping the osAi process";
   await scheduleStateWrite(true);
@@ -487,6 +620,7 @@ async function finish(
         ? "Training stopped by the user"
         : "Training failed; open the log for details";
   if (error) state.error = error.slice(0, 1000);
+  await metricWrites.catch(() => undefined);
   await atomicStateWrite();
 }
 
@@ -504,6 +638,14 @@ async function main() {
   state.indeterminate = true;
   state.message = "Checking the model and local training backend";
   await atomicStateWrite();
+  await fs.writeFile(
+    path.join(job.sessionDirectory, "metrics.csv"),
+    metricHeader,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
   const log = createWriteStream(job.logPath, { flags: "a", mode: 0o600 });
   log.write(`[osAi App] ${state.startedAt}\n[osAi App] ${state.command}\n\n`);
   const backendEnvironment = await backendRuntimeEnvironment(job.executable);
@@ -516,6 +658,7 @@ async function main() {
     env: {
       ...backendEnvironment,
       PYTHONUNBUFFERED: "1",
+      PYTHONIOENCODING: "utf-8",
       OSAI_APP_SESSION: job.id,
       ...(job.checkpointRequestPath
         ? { OSAI_CHECKPOINT_REQUEST: job.checkpointRequestPath }

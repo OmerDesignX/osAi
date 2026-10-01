@@ -364,6 +364,26 @@ function registerIpc() {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.log(id);
   });
+  ipcMain.handle("training:metrics", (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Invalid training session");
+    return sessionService.metrics(id);
+  });
+  ipcMain.handle("training:metrics-export", async (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Invalid training session");
+    const state = await sessionService.find(id);
+    const source = path.join(state.sessionDirectory, "metrics.csv");
+    if (!(await fs.stat(source).catch(() => null)))
+      throw new Error("This session has no recorded loss history yet");
+    const safeName = state.name.replace(/[^A-Za-z0-9._-]+/g, "-");
+    const result = await dialog.showSaveDialog({
+      title: "Save training history as CSV",
+      defaultPath: path.join(os.homedir(), `${safeName}-training.csv`),
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    await fs.copyFile(source, result.filePath);
+    return result.filePath;
+  });
   ipcMain.handle("training:artifacts", async (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     const state = await sessionService.find(id);

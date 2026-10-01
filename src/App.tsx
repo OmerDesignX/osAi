@@ -11,6 +11,7 @@ import type {
   Preferences,
   SessionArtifacts,
   SessionState,
+  TrainingMetric,
   Theme,
   TrainingRequest,
   TrainingStage,
@@ -28,6 +29,7 @@ import {
 } from "./lora-guidance.js";
 import { DataEditor } from "./DataEditor.js";
 import { TrainingWiki } from "./TrainingWiki.js";
+import { LossChart } from "./LossChart.js";
 
 type IconName = keyof typeof feather.icons;
 
@@ -327,6 +329,7 @@ export function App() {
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [log, setLog] = useState("");
+  const [metrics, setMetrics] = useState<TrainingMetric[]>([]);
   const [backend, setBackend] = useState<BackendStatus | null>(null);
   const [backendChecking, setBackendChecking] = useState(false);
   const [backendInstall, setBackendInstall] = useState(fallbackBackendInstall);
@@ -342,7 +345,6 @@ export function App() {
   );
   const [customModelBytes, setCustomModelBytes] = useState<number | null>(null);
   const [benchmarkDevices, setBenchmarkDevices] = useState<string[]>([]);
-  const [benchmarkMessage, setBenchmarkMessage] = useState("");
   const [deviceSignature, setDeviceSignature] = useState<string | null>(null);
   const [sessionArtifacts, setSessionArtifacts] =
     useState<SessionArtifacts | null>(null);
@@ -383,7 +385,9 @@ export function App() {
     [selectedId, sessions],
   );
   const active = sessions.find((session) =>
-    ["queued", "running", "paused", "stopping"].includes(session.status),
+    ["queued", "running", "pausing", "paused", "stopping"].includes(
+      session.status,
+    ),
   );
   const sessionMenuSession = sessions.find(
     (session) => session.id === sessionMenu?.id,
@@ -545,7 +549,7 @@ export function App() {
         : selectionClearedRef.current
           ? ""
           : next.find((session) =>
-              ["queued", "running", "paused", "stopping"].includes(
+              ["queued", "running", "pausing", "paused", "stopping"].includes(
                 session.status,
               ),
             )?.id ||
@@ -651,7 +655,6 @@ export function App() {
     setBenchmarkPreset(null);
     setBenchmarkModelBytes(null);
     setBenchmarkBusy(true);
-    setBenchmarkMessage("");
     const timer = window.setTimeout(() => {
       void window.osai
         .autoBenchmark(form)
@@ -670,9 +673,6 @@ export function App() {
           });
           setBenchmarkModelBytes(settings.model_size_bytes);
           setBenchmarkDevices(result.devices);
-          setBenchmarkMessage(
-            `Auto settings: ${settings.max_seq_length}-token context${result.engine === "llama.cpp" ? `, ${settings.gguf_batch_size} GGUF microbatch` : ""} for ${result.devices.length ? result.devices.join(", ") : "CPU"}.`,
-          );
           void window.osai.hardwareInfo().then(setHardware);
         })
         .catch((error) => {
@@ -789,6 +789,29 @@ export function App() {
     };
     void load();
     const interval = window.setInterval(() => void load(), 1_200);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [selected?.id]);
+
+  useEffect(() => {
+    if (!selected) {
+      setMetrics([]);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const history = await window.osai.sessionMetrics(selected.id);
+        if (!cancelled) setMetrics(history);
+      } catch (error) {
+        if (!cancelled) setNotice(readableError(error));
+      }
+    };
+    setMetrics([]);
+    void load();
+    const interval = window.setInterval(() => void load(), 4_000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
@@ -1168,41 +1191,36 @@ export function App() {
     >
       <div className="mac-titlebar-safe-area" aria-hidden="true" />
       <header className="topbar">
-        <div className="brand" aria-label="osAi">
-          <img src={osAiIcon} alt="" aria-hidden="true" />
-          <div className="brand-wordmark">
-            <span>os</span>
-            <b>Ai</b>
-          </div>
+        <div
+          className="auto-settings-strip"
+          aria-label="Selected training settings"
+        >
+          {form.autoSettings ? (
+            <>
+              <span className="auto-settings-title">
+                {benchmarkBusy ? "Measuring hardware…" : "Auto settings"}
+              </span>
+              {(selected?.autoSettingsSummary
+                ? selected.autoSettingsSummary.split(" · ")
+                : [
+                    `Context ${hardwarePreset.maxSeqLength}`,
+                    `Batch ${hardwarePreset.batchSize}`,
+                    `Rank ${hardwarePreset.rank}`,
+                    `Microbatch ${hardwarePreset.ggufBatchSize}`,
+                    benchmarkDevices.length
+                      ? benchmarkDevices.join(" + ")
+                      : "CPU",
+                  ]
+              ).map((item, index) => (
+                <span key={`${item}-${index}`}>{item}</span>
+              ))}
+            </>
+          ) : (
+            <span className="auto-settings-title">Manual settings</span>
+          )}
         </div>
 
-        <div
-          className={
-            "global-activity " +
-            (notice || benchmarkBusy || benchmarkMessage ? "has-status" : "")
-          }
-          aria-live="polite"
-        >
-          {(benchmarkBusy || benchmarkMessage) && !notice && (
-            <div className="top-status benchmark-status" role="status">
-              <Icon name="activity" />
-              <span>
-                {benchmarkBusy
-                  ? "Benchmarking this model and hardware for Auto settings…"
-                  : benchmarkMessage}
-              </span>
-              {!benchmarkBusy && (
-                <button
-                  type="button"
-                  className="notice-dismiss"
-                  onClick={() => setBenchmarkMessage("")}
-                  aria-label="Dismiss benchmark notification"
-                >
-                  <Icon name="x" />
-                </button>
-              )}
-            </div>
-          )}
+        <div className="global-activity" aria-live="polite">
           {notice && (
             <div className="top-status notification" role="status">
               <Icon name="alert-circle" />
@@ -2484,17 +2502,32 @@ export function App() {
             <footer className="panel-footer">
               {active ? (
                 <div className="active-run-controls">
-                  {active.status === "running" && (
+                  {(active.status === "running" ||
+                    active.status === "pausing") && (
                     <button
-                      className="primary-button"
-                      disabled={Boolean(sessionControl)}
+                      className={
+                        "primary-button" +
+                        (sessionControl === "pausing" ||
+                        active.status === "pausing"
+                          ? " busy-control"
+                          : "")
+                      }
+                      disabled={
+                        Boolean(sessionControl) || active.status === "pausing"
+                      }
                       onClick={() => void pauseTraining(active.id)}
                     >
                       <Icon
-                        name={sessionControl === "pausing" ? "loader" : "pause"}
+                        name={
+                          sessionControl === "pausing" ||
+                          active.status === "pausing"
+                            ? "loader"
+                            : "pause"
+                        }
                       />
-                      {sessionControl === "pausing"
-                        ? "Pausing…"
+                      {sessionControl === "pausing" ||
+                      active.status === "pausing"
+                        ? "Saving, then pausing…"
                         : "Pause training"}
                     </button>
                   )}
@@ -2742,14 +2775,22 @@ export function App() {
                     role="menuitem"
                     disabled={
                       !sessionMenuSession.request ||
-                      ["queued", "running", "paused", "stopping"].includes(
-                        sessionMenuSession.status,
-                      )
+                      [
+                        "queued",
+                        "running",
+                        "pausing",
+                        "paused",
+                        "stopping",
+                      ].includes(sessionMenuSession.status)
                     }
                     title={
-                      ["queued", "running", "paused", "stopping"].includes(
-                        sessionMenuSession.status,
-                      )
+                      [
+                        "queued",
+                        "running",
+                        "pausing",
+                        "paused",
+                        "stopping",
+                      ].includes(sessionMenuSession.status)
                         ? "Stop this session before restarting it"
                         : sessionMenuSession.request
                           ? "Clear this pipeline and restart with its saved settings"
@@ -2770,13 +2811,18 @@ export function App() {
                     disabled={[
                       "queued",
                       "running",
+                      "pausing",
                       "paused",
                       "stopping",
                     ].includes(sessionMenuSession.status)}
                     title={
-                      ["queued", "running", "paused", "stopping"].includes(
-                        sessionMenuSession.status,
-                      )
+                      [
+                        "queued",
+                        "running",
+                        "pausing",
+                        "paused",
+                        "stopping",
+                      ].includes(sessionMenuSession.status)
                         ? "Stop this session before deleting it"
                         : "Move this session to Trash"
                     }
@@ -2815,14 +2861,34 @@ export function App() {
                       {friendlyTime(selected.startedAt || selected.createdAt)}
                     </p>
                   </div>
-                  <strong>{Math.round(selected.progress)}%</strong>
+                  <strong
+                    className={
+                      selected.indeterminate ? "phase-label" : undefined
+                    }
+                  >
+                    {selected.status === "completed"
+                      ? "100%"
+                      : !selected.indeterminate &&
+                          selected.trainingPercent !== undefined
+                        ? `${selected.trainingPercent.toFixed(2)}%`
+                        : selected.indeterminate
+                          ? phaseLabel(selected.phase)
+                          : `${Math.round(selected.progress)}%`}
+                  </strong>
                 </header>
                 <div className="inline-progress">
                   <span
                     className={
                       selected.indeterminate ? "indeterminate" : undefined
                     }
-                    style={{ width: Math.max(2, selected.progress) + "%" }}
+                    style={{
+                      width: `${Math.max(
+                        0,
+                        selected.status === "completed"
+                          ? 100
+                          : (selected.trainingPercent ?? selected.progress),
+                      )}%`,
+                    }}
                   />
                 </div>
                 <div
@@ -2936,28 +3002,52 @@ export function App() {
                     </button>
                   </div>
                 )}
-                <div className="log-heading">
-                  <span>Live output</span>
-                </div>
-                <div className="training-log-shell">
-                  <pre
-                    className="training-log"
-                    ref={logRef}
-                    onScroll={handleLogScroll}
-                  >
-                    {log || "Waiting for osAi output…"}
-                  </pre>
-                  {showLogLatest && (
-                    <button
-                      type="button"
-                      className="log-latest-button"
-                      onClick={jumpToLatestLog}
-                      aria-label="Jump to latest output"
-                      title="Jump to latest output"
-                    >
-                      <Icon name="arrow-down" size={15} />
-                    </button>
-                  )}
+                <div className="training-monitor">
+                  <section className="training-monitor-panel">
+                    <div className="log-heading">
+                      <span>Live output</span>
+                    </div>
+                    <div className="training-log-shell">
+                      <pre
+                        className="training-log"
+                        ref={logRef}
+                        onScroll={handleLogScroll}
+                      >
+                        {log || "Waiting for osAi output…"}
+                      </pre>
+                      {showLogLatest && (
+                        <button
+                          type="button"
+                          className="log-latest-button"
+                          onClick={jumpToLatestLog}
+                          aria-label="Jump to latest output"
+                          title="Jump to latest output"
+                        >
+                          <Icon name="arrow-down" size={15} />
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                  <section className="training-monitor-panel loss-monitor">
+                    <div className="log-heading loss-heading">
+                      <span>Training loss</span>
+                      <button
+                        type="button"
+                        className="quiet-button"
+                        disabled={!metrics.length}
+                        onClick={() =>
+                          void window.osai
+                            .exportSessionMetrics(selected.id)
+                            .catch((error) => setNotice(readableError(error)))
+                        }
+                      >
+                        <Icon name="download" size={14} /> Save CSV
+                      </button>
+                    </div>
+                    <div className="loss-chart-shell">
+                      <LossChart metrics={metrics} />
+                    </div>
+                  </section>
                 </div>
                 <p className="detached-note">
                   <Icon name="power" />

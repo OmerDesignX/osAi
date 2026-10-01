@@ -48,6 +48,14 @@ test("tracks llama.cpp fine-tuning data progress", () => {
   );
 });
 
+test("uses native data progress even when an epoch appears on the same row", () => {
+  const parser = new FineTuneProgressParser(1);
+  assert.deepEqual(
+    parser.consume("train: epoch 0 data=43199/487398400 loss=0.52±0.01"),
+    { completed: 43199, total: 487398400 },
+  );
+});
+
 test("combines labelled multi-GPU worker progress", () => {
   const parser = new FineTuneProgressParser(1);
   assert.equal(

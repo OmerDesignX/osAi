@@ -122,6 +122,7 @@ export type SessionState = {
   status:
     | "queued"
     | "running"
+    | "pausing"
     | "paused"
     | "stopping"
     | "completed"
@@ -136,6 +137,7 @@ export type SessionState = {
     | "publishing"
     | "complete";
   progress: number;
+  trainingPercent?: number;
   indeterminate: boolean;
   message: string;
   autoSettingsSummary?: string;
@@ -152,6 +154,17 @@ export type SessionState = {
   command: string;
   error?: string;
   request?: Partial<TrainingRequest>;
+};
+
+export type TrainingMetric = {
+  time: string;
+  percent: number;
+  device: string;
+  loss: number | null;
+  lossUncertainty: number | null;
+  accuracy: number | null;
+  accuracyUncertainty: number | null;
+  event: "loss" | "checkpoint";
 };
 
 export type BackendStatus = {
@@ -311,6 +324,8 @@ export type OsAiBridge = {
   deleteSession(id: string): Promise<void>;
   listSessions(): Promise<SessionState[]>;
   sessionLog(id: string): Promise<string>;
+  sessionMetrics(id: string): Promise<TrainingMetric[]>;
+  exportSessionMetrics(id: string): Promise<string | null>;
   sessionArtifacts(id: string): Promise<SessionArtifacts>;
   openSessionArtifacts(id: string): Promise<void>;
   revealSession(id: string): Promise<void>;

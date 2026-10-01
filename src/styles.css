@@ -134,7 +134,7 @@ p {
   min-width: 0;
   height: 68px;
   display: grid;
-  grid-template-columns: max-content minmax(44px, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) auto max-content;
   align-items: center;
   gap: 12px;
   padding: 0 16px 0 20px;
@@ -147,42 +147,38 @@ p {
   padding-left: 20px;
 }
 
-.brand {
-  min-width: 132px;
-  max-width: 180px;
+.auto-settings-strip {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.brand > img {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 auto;
-  border-radius: 7px;
-  object-fit: cover;
-}
-
-.brand-wordmark {
-  display: inline-flex;
-  align-items: baseline;
-  font-size: 20px;
-  letter-spacing: -1.25px;
-  line-height: 1;
+  overflow-x: auto;
   white-space: nowrap;
+  scrollbar-width: none;
+  -webkit-app-region: no-drag;
 }
 
-.brand-wordmark span {
-  font-family: "Manrope", system-ui, sans-serif;
-  font-size: inherit;
-  font-weight: 600;
-  letter-spacing: -0.95px;
+.auto-settings-strip::-webkit-scrollbar {
+  display: none;
 }
 
-.brand-wordmark b {
-  font-family: "Playfair Display", Georgia, serif;
-  font-size: inherit;
-  font-weight: 600;
+.auto-settings-strip > span {
+  flex: 0 0 auto;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auto-settings-strip > span:first-child {
+  padding-left: 0;
+}
+
+.auto-settings-strip > span + span {
+  border-left: 1px solid var(--line);
+}
+
+.auto-settings-strip .auto-settings-title {
+  color: var(--accent);
+  font-weight: 650;
 }
 
 .global-activity {
@@ -191,6 +187,11 @@ p {
   display: flex;
   align-items: center;
   -webkit-app-region: no-drag;
+}
+
+.global-activity:not(:empty) {
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
 }
 
 .top-status {
@@ -274,8 +275,8 @@ p {
   height: 46px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px;
+  gap: 16px;
+  padding: 2px 0 2px 16px;
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-app-region: no-drag;
@@ -305,7 +306,7 @@ p {
 
 .top-action {
   height: 42px;
-  padding: 0 13px;
+  padding: 0 15px;
   color: var(--muted);
   background: transparent;
 }
@@ -2437,6 +2438,12 @@ select:disabled {
   font-weight: 400;
 }
 
+.session-summary > strong.phase-label {
+  font-family: "Manrope", system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .inline-progress,
 .status-track {
   position: relative;
@@ -2590,6 +2597,123 @@ select:disabled {
   min-width: 0;
   min-height: 190px;
   flex: 1;
+}
+
+.training-monitor {
+  min-width: 0;
+  min-height: 240px;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.training-monitor-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.training-monitor-panel .training-log-shell {
+  min-height: 0;
+}
+
+.training-monitor-panel .training-log {
+  min-height: 0;
+}
+
+.loss-heading {
+  min-height: 27px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.loss-heading .quiet-button {
+  min-height: 27px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.loss-chart-shell {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 76%, #050607);
+}
+
+.loss-chart-content {
+  width: 100%;
+  min-width: 0;
+}
+
+.loss-chart-content svg {
+  width: 100%;
+  height: auto;
+  max-height: 330px;
+}
+
+.loss-chart-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.loss-chart-axis {
+  fill: var(--muted);
+  font:
+    11px "Fira Code",
+    ui-monospace,
+    monospace;
+}
+
+.loss-chart-checkpoint {
+  stroke: var(--success);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.loss-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.loss-chart-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.loss-chart-legend i {
+  width: 14px;
+  height: 3px;
+  border-radius: 3px;
+}
+
+.loss-chart-legend i.checkpoint-key {
+  background: var(--success);
+}
+
+.loss-chart-empty {
+  max-width: 240px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.busy-control .icon {
+  animation: update-spin 900ms linear infinite;
 }
 
 .training-log {
@@ -2983,6 +3107,15 @@ select:disabled {
   }
 
   .topbar {
-    grid-template-columns: max-content minmax(44px, 1fr) max-content;
+    grid-template-columns: minmax(0, 1fr) auto max-content;
+  }
+
+  .training-monitor {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .training-monitor-panel {
+    min-height: 260px;
   }
 }
