@@ -66,22 +66,14 @@ p {
   height: 100%;
   min-width: 940px;
   display: grid;
-  grid-template-rows: 68px minmax(0, 1fr) 46px;
+  grid-template-rows: 68px minmax(0, 1fr) 52px;
   color: var(--text);
   background: var(--bg);
   font-size: 13px;
 }
 
-.app.statusbar-hidden {
-  grid-template-rows: 68px minmax(0, 1fr);
-}
-
 .app.platform-darwin {
-  grid-template-rows: 30px 68px minmax(0, 1fr) 46px;
-}
-
-.app.platform-darwin.statusbar-hidden {
-  grid-template-rows: 30px 68px minmax(0, 1fr);
+  grid-template-rows: 30px 68px minmax(0, 1fr) 52px;
 }
 
 .mac-titlebar-safe-area {
@@ -179,6 +171,26 @@ p {
 .auto-settings-strip .auto-settings-title {
   color: var(--accent);
   font-weight: 650;
+}
+
+.hardware-sheet-trigger {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 10px;
+  padding: 7px 11px;
+  color: var(--accent);
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+
+.hardware-sheet-trigger:hover,
+.hardware-sheet-trigger:focus-visible {
+  outline: 0;
+  background: var(--control-selected);
 }
 
 .global-activity {
@@ -2594,17 +2606,12 @@ select:disabled {
   font-weight: 600;
 }
 
-.inline-progress,
 .status-track {
   position: relative;
   overflow: hidden;
   height: 5px;
   border-radius: var(--radius-pill);
   background: var(--panel2);
-}
-
-.inline-progress {
-  margin: 18px 0 14px;
 }
 
 .session-status-details {
@@ -2635,7 +2642,6 @@ select:disabled {
   overflow-wrap: anywhere;
 }
 
-.inline-progress > span,
 .status-track > span {
   display: block;
   height: 100%;
@@ -2644,7 +2650,6 @@ select:disabled {
   transition: width 280ms ease;
 }
 
-.inline-progress > span.indeterminate,
 .status-track > span.indeterminate {
   width: 34% !important;
   animation: indeterminate 1.4s ease-in-out infinite;
@@ -2986,12 +2991,12 @@ select:disabled {
 
 .statusbar {
   min-width: 0;
-  height: 46px;
+  height: 52px;
   display: grid;
-  grid-template-columns: minmax(230px, auto) minmax(120px, 1fr) 54px;
+  grid-template-columns: minmax(250px, 1fr) minmax(170px, 0.7fr) 70px;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
+  gap: 20px;
+  padding: 0 20px;
   border-top: 1px solid var(--line);
   background: var(--topbar);
 }
@@ -3017,6 +3022,109 @@ select:disabled {
   font-family: "Fira Code", ui-monospace, monospace;
   font-size: 12px;
   text-align: right;
+}
+
+.hardware-sheet-backdrop {
+  position: fixed;
+  z-index: 270;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+.hardware-sheet {
+  width: min(440px, 100vw);
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 22px;
+  color: var(--text);
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: -16px 0 50px var(--shadow);
+}
+
+.hardware-sheet > header,
+.hardware-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hardware-sheet > header h2,
+.hardware-sheet > header p,
+.hardware-sheet > p {
+  margin: 0;
+}
+
+.hardware-sheet > header h2 {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 24px;
+}
+
+.hardware-sheet > header p,
+.hardware-note,
+.hardware-empty {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.hardware-card {
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.hardware-card-title {
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.hardware-card-title strong {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hardware-card-title span {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.hardware-card dl {
+  margin: 12px 0 0;
+}
+
+.hardware-card dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+
+.hardware-card dt {
+  color: var(--muted);
+}
+
+.hardware-card dd {
+  margin: 0;
+  text-align: right;
+}
+
+.hardware-divider {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .app-dialog-backdrop {

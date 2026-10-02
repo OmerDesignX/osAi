@@ -10,6 +10,7 @@ import type {
 const bridge: OsAiBridge = {
   platform: process.platform,
   hardwareInfo: () => ipcRenderer.invoke("system:hardware"),
+  hardwareSnapshot: () => ipcRenderer.invoke("system:hardware-snapshot"),
   loadPreferences: () => ipcRenderer.invoke("preferences:get"),
   savePreferences: (value: Preferences) =>
     ipcRenderer.invoke("preferences:set", value),

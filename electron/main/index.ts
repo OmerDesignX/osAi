@@ -32,6 +32,7 @@ import {
   saveDataset,
 } from "./dataset-editor.js";
 import { modelTrainingSummary } from "./model-summary.js";
+import { hardwareSnapshot } from "./hardware-snapshot.js";
 import { AppUpdateService } from "./updater.js";
 import { migrateLegacyV1Models } from "./model-migration.js";
 
@@ -214,6 +215,7 @@ function registerIpc() {
     physicalMemoryBytes: os.totalmem(),
     logicalCpuCount: Math.max(1, os.cpus().length),
   }));
+  ipcMain.handle("system:hardware-snapshot", () => hardwareSnapshot());
   ipcMain.handle("preferences:get", () => preferences());
   ipcMain.handle("preferences:set", async (_event, value: unknown) => {
     const saved = await writePreferences(

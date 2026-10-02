@@ -64,10 +64,16 @@ The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SD
 3. Leave **Engine**, **Accelerator**, and **Multi-GPU** on **Auto** for hardware-aware selection, or choose them manually.
 4. Under **Pipeline**, press **Fine-tune**, **Align**, or **Fine-tune + align**.
 5. Press the dataset browse button and select a `.json`, `.jsonl`, `.ndjson`, or `.parquet` file, or a folder containing data files.
-6. Keep **Fit settings to this hardware** enabled and press **Calibrate**. In the default **Full** context mode, osAi first scans every selected training file for its longest tokenized record and checks the model's context limit. It then fits the hardware and tests cautious learning rates with short local excerpts. **Quick Settings** unlocks when the pilot loss decreases. The selected data is not changed.
+6. Keep **Fit settings to this hardware** enabled and press **Calibrate**. In the default **Full** context mode, osAi first scans every selected training file for its longest tokenized record and checks the model's context limit. The exact scan can take several minutes on a large dataset. It then fits the hardware and runs a bounded quick pilot (up to two minutes) on short excerpts. **Quick Settings** unlocks when the pilot loss decreases. The selected data is not changed.
 7. Enter a recognizable **Session name**, or leave the suggested name in place.
 8. Choose **Save sessions in** when a different location is needed. The default is `~/osAi/sessions` in the user's home folder.
 9. Press **Start training** after calibration completes. Changing the model, dataset, optimizer, epoch count, context mode, or GPUs requires calibration again.
+
+The bottom bar is the single progress display for setup, hardware fitting,
+calibration, and training. It shows the current step; stages without a reliable
+total use a moving indicator. Open **Hardware** in the top strip to see the CPU
+and each detected GPU. Live memory, load, and temperature appear when the
+device driver exposes them.
 
 While a run is active, **Start training** becomes **Pause training**, **Save checkpoint**, and **Stop training**. A paused run can be resumed from the same controls. **Save checkpoint** writes the current adapter at the next safe optimizer step; a paused run finishes its save after resuming. The session shows when the latest adapter and reusable model are ready. Automatic saves replace the same latest checkpoint rather than collecting numbered copies. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. Individual split shards, MLX files, and V2 GGUF projectors are downloaded from the selected V1/V2 catalog and checked against its published SHA-256 list. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
 

@@ -199,6 +199,30 @@ export type HardwareInfo = {
   logicalCpuCount: number;
 };
 
+export type GpuSnapshot = {
+  id: string;
+  name: string;
+  backend: string;
+  memoryTotalBytes: number | null;
+  memoryUsedBytes: number | null;
+  utilizationPercent: number | null;
+  temperatureC: number | null;
+  note: string;
+};
+
+export type HardwareSnapshot = {
+  sampledAt: string;
+  cpu: {
+    name: string;
+    logicalCores: number;
+    utilizationPercent: number | null;
+    memoryTotalBytes: number;
+    memoryUsedBytes: number;
+    temperatureC: number | null;
+  };
+  gpus: GpuSnapshot[];
+};
+
 export type DatasetTask =
   "auto" | "supervised" | "preference" | "reward" | "text";
 
@@ -315,6 +339,7 @@ export type AppUpdateStatus = {
 export type OsAiBridge = {
   platform: string;
   hardwareInfo(): Promise<HardwareInfo>;
+  hardwareSnapshot(): Promise<HardwareSnapshot>;
   loadPreferences(): Promise<Preferences>;
   savePreferences(value: Preferences): Promise<Preferences>;
   chooseDirectory(title: string): Promise<string>;

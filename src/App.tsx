@@ -15,6 +15,7 @@ import type {
   BackendInstallStatus,
   BackendStatus,
   HardwareInfo,
+  HardwareSnapshot,
   LoraTargetModule,
   Preferences,
   SessionArtifacts,
@@ -219,6 +220,12 @@ function readableError(error: unknown) {
     .trim();
 }
 
+function memoryLabel(bytes: number | null) {
+  return bytes === null
+    ? "Unavailable"
+    : `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+}
+
 const defaults: TrainingRequest = {
   sessionsRoot: "",
   modelSource: "official",
@@ -408,6 +415,9 @@ export function App() {
   const [backendChecking, setBackendChecking] = useState(false);
   const [backendInstall, setBackendInstall] = useState(fallbackBackendInstall);
   const [hardware, setHardware] = useState(fallbackHardware);
+  const [hardwareSheetOpen, setHardwareSheetOpen] = useState(false);
+  const [hardwareSnapshot, setHardwareSnapshot] =
+    useState<HardwareSnapshot | null>(null);
   const [update, setUpdate] = useState(fallbackUpdate);
   const [notice, setNotice] = useState("");
   const [benchmarkBusy, setBenchmarkBusy] = useState(false);
@@ -663,6 +673,27 @@ export function App() {
   }, [guidanceOpen]);
 
   useEffect(() => window.osai.onCalibrationProgress(setCalibrationMessage), []);
+
+  useEffect(() => {
+    if (!hardwareSheetOpen) return;
+    let current = true;
+    const refresh = () => {
+      void window.osai
+        .hardwareSnapshot()
+        .then((snapshot) => {
+          if (current) setHardwareSnapshot(snapshot);
+        })
+        .catch((error) => {
+          if (current) setNotice(readableError(error));
+        });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 5_000);
+    return () => {
+      current = false;
+      window.clearInterval(interval);
+    };
+  }, [hardwareSheetOpen]);
 
   const refreshSessions = useCallback(async () => {
     const next = await window.osai.listSessions();
@@ -1417,18 +1448,23 @@ export function App() {
             : backendInstall.state === "error"
               ? "Try installation again"
               : "Install osAi";
-  const showStatusbar =
-    !active || selected?.id !== active.id || settingsOpen || !backendReady;
+  const footerIndeterminate =
+    calibrationBusy ||
+    benchmarkBusy ||
+    starting ||
+    Boolean(active?.indeterminate) ||
+    (backendInstallBusy && typeof backendInstall.percent !== "number");
+  const footerPercent = active
+    ? active.progress
+    : backendInstallBusy && typeof backendInstall.percent === "number"
+      ? backendInstall.percent
+      : 0;
 
   return (
     <div
       ref={appRootRef}
       className={
-        "app " +
-        preferences.theme +
-        " platform-" +
-        window.osai.platform +
-        (showStatusbar ? "" : " statusbar-hidden")
+        "app " + preferences.theme + " platform-" + window.osai.platform
       }
     >
       <div className="mac-titlebar-safe-area" aria-hidden="true" />
@@ -1460,6 +1496,15 @@ export function App() {
           ) : (
             <span className="auto-settings-title">Manual settings</span>
           )}
+          <button
+            type="button"
+            className="hardware-sheet-trigger"
+            onClick={() => setHardwareSheetOpen(true)}
+            aria-expanded={hardwareSheetOpen}
+          >
+            <Icon name="cpu" />
+            Hardware
+          </button>
         </div>
 
         <div className="global-activity" aria-live="polite">
@@ -3258,36 +3303,7 @@ export function App() {
                       {friendlyTime(selected.startedAt || selected.createdAt)}
                     </p>
                   </div>
-                  <strong
-                    className={
-                      selected.indeterminate ? "phase-label" : undefined
-                    }
-                  >
-                    {selected.status === "completed"
-                      ? "100%"
-                      : !selected.indeterminate &&
-                          selected.trainingPercent !== undefined
-                        ? `${selected.trainingPercent.toFixed(2)}%`
-                        : selected.indeterminate
-                          ? phaseLabel(selected.phase)
-                          : `${Math.round(selected.progress)}%`}
-                  </strong>
                 </header>
-                <div className="inline-progress">
-                  <span
-                    className={
-                      selected.indeterminate ? "indeterminate" : undefined
-                    }
-                    style={{
-                      width: `${Math.max(
-                        0,
-                        selected.status === "completed"
-                          ? 100
-                          : (selected.trainingPercent ?? selected.progress),
-                      )}%`,
-                    }}
-                  />
-                </div>
                 <div
                   className="session-status-details"
                   aria-label="Training status"
@@ -3531,65 +3547,195 @@ export function App() {
         </main>
       )}
 
-      {showStatusbar && (
-        <footer
-          className={
-            "statusbar " +
-            (active
-              ? "active"
-              : backendReady
-                ? "idle"
-                : backendInstallBusy
-                  ? "installing"
-                  : "setup-needed")
-          }
-        >
-          <div className="progress-copy">
-            <Icon
-              name={active ? "activity" : backendReady ? "check" : "download"}
-            />
-            <span>
-              {active
-                ? active.name + " · " + active.message
+      <footer
+        className={
+          "statusbar " +
+          (active
+            ? "active"
+            : backendReady
+              ? "idle"
+              : backendInstallBusy
+                ? "installing"
+                : "setup-needed")
+        }
+      >
+        <div className="progress-copy">
+          <Icon
+            name={
+              calibrationBusy || benchmarkBusy || active
+                ? "activity"
                 : backendReady
-                  ? "Ready"
-                  : backend === null || backendChecking
-                    ? "Checking osAi CLI"
-                    : backendInstall.state === "error"
-                      ? "osAi CLI setup failed"
-                      : backend?.message || backendInstall.message}
-            </span>
-          </div>
-          <div className="status-track">
-            <span
-              className={
-                !active &&
-                backendInstallBusy &&
-                typeof backendInstall.percent !== "number"
-                  ? "indeterminate"
-                  : ""
-              }
-              style={{
-                width:
-                  (active
-                    ? Math.max(2, active.progress)
-                    : backendInstallBusy &&
-                        typeof backendInstall.percent === "number"
-                      ? Math.max(2, backendInstall.percent)
-                      : 0) + "%",
-              }}
-            />
-          </div>
-          <span className="status-percent">
-            {active
-              ? Math.round(active.progress) + "%"
+                  ? "check"
+                  : "download"
+            }
+          />
+          <span>
+            {calibrationBusy
+              ? `Calibration · ${calibrationMessage}`
+              : starting
+                ? "Preparing and checking the selected training data…"
+                : active
+                  ? active.name + " · " + active.message
+                  : benchmarkBusy
+                    ? "Measuring the model and available hardware…"
+                    : backendReady
+                      ? "Ready"
+                      : backend === null || backendChecking
+                        ? "Checking osAi CLI"
+                        : backendInstall.state === "error"
+                          ? "osAi CLI setup failed"
+                          : backend?.message || backendInstall.message}
+          </span>
+        </div>
+        <div className="status-track">
+          <span
+            className={footerIndeterminate ? "indeterminate" : ""}
+            style={{ width: `${Math.max(0, Math.min(100, footerPercent))}%` }}
+          />
+        </div>
+        <span className="status-percent">
+          {calibrationBusy || starting || benchmarkBusy
+            ? "Working"
+            : active
+              ? `${active.progress.toFixed(1)}%`
               : backendReady
                 ? "Local"
                 : typeof backendInstall.percent === "number"
                   ? `${backendInstall.percent}%`
                   : "Setup"}
-          </span>
-        </footer>
+        </span>
+      </footer>
+
+      {hardwareSheetOpen && (
+        <div
+          className="hardware-sheet-backdrop"
+          role="presentation"
+          onMouseDown={(event) =>
+            event.target === event.currentTarget && setHardwareSheetOpen(false)
+          }
+        >
+          <aside
+            className="hardware-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hardware-sheet-title"
+          >
+            <header>
+              <div>
+                <h2 id="hardware-sheet-title">Hardware</h2>
+                <p>Live local readings refresh every five seconds.</p>
+              </div>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close hardware"
+                onClick={() => setHardwareSheetOpen(false)}
+              >
+                <Icon name="x" />
+              </button>
+            </header>
+            {hardwareSnapshot ? (
+              <>
+                <section className="hardware-card">
+                  <div className="hardware-card-title">
+                    <Icon name="cpu" />
+                    <strong>{hardwareSnapshot.cpu.name}</strong>
+                    <span>CPU</span>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>Load</dt>
+                      <dd>
+                        {hardwareSnapshot.cpu.utilizationPercent === null
+                          ? "Measuring…"
+                          : `${hardwareSnapshot.cpu.utilizationPercent.toFixed(0)}%`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Memory</dt>
+                      <dd>
+                        {memoryLabel(hardwareSnapshot.cpu.memoryUsedBytes)} /{" "}
+                        {memoryLabel(hardwareSnapshot.cpu.memoryTotalBytes)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Logical cores</dt>
+                      <dd>{hardwareSnapshot.cpu.logicalCores}</dd>
+                    </div>
+                    <div>
+                      <dt>Temperature</dt>
+                      <dd>
+                        {hardwareSnapshot.cpu.temperatureC === null
+                          ? "Unavailable"
+                          : `${hardwareSnapshot.cpu.temperatureC} °C`}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+                <div className="hardware-divider">
+                  GPUs · {hardwareSnapshot.gpus.length}
+                </div>
+                {hardwareSnapshot.gpus.length ? (
+                  hardwareSnapshot.gpus.map((gpu) => (
+                    <section className="hardware-card" key={gpu.id}>
+                      <div className="hardware-card-title">
+                        <Icon name="monitor" />
+                        <strong>{gpu.name}</strong>
+                        <span>{gpu.backend}</span>
+                      </div>
+                      <dl>
+                        <div>
+                          <dt>Status</dt>
+                          <dd>
+                            {gpu.utilizationPercent === null
+                              ? gpu.note
+                              : gpu.utilizationPercent > 1
+                                ? "Active"
+                                : "Idle"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Load</dt>
+                          <dd>
+                            {gpu.utilizationPercent === null
+                              ? "Unavailable"
+                              : `${gpu.utilizationPercent}%`}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Memory</dt>
+                          <dd>
+                            {gpu.memoryTotalBytes === null
+                              ? "Unavailable"
+                              : `${memoryLabel(gpu.memoryUsedBytes)} / ${memoryLabel(gpu.memoryTotalBytes)}`}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Temperature</dt>
+                          <dd>
+                            {gpu.temperatureC === null
+                              ? "Unavailable"
+                              : `${gpu.temperatureC} °C`}
+                          </dd>
+                        </div>
+                      </dl>
+                    </section>
+                  ))
+                ) : (
+                  <p className="hardware-empty">
+                    No GPU was reported by the available system tools.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="hardware-empty">Reading CPU and GPU devices…</p>
+            )}
+            <p className="hardware-note">
+              GPU memory is per device. Metal on Apple silicon shares system
+              memory. Some drivers do not expose temperature or load.
+            </p>
+          </aside>
+        </div>
       )}
 
       {noticeExpanded && notice && (

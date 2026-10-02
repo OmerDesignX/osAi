@@ -17,6 +17,6 @@ test("macOS uses a dedicated draggable title-bar handle", async () => {
   );
   assert.match(
     styles,
-    /\.app\.platform-darwin\s*\{\s*grid-template-rows: 30px 68px minmax\(0, 1fr\) 46px;/,
+    /\.app\.platform-darwin\s*\{\s*grid-template-rows: 30px 68px minmax\(0, 1fr\) 52px;/,
   );
 });
