@@ -7,8 +7,6 @@ import { autoBenchmarkArgs } from "./auto-benchmark.js";
 import { backendRuntimeEnvironment } from "./backend-source.js";
 
 const outputLimit = 64 * 1024;
-const scanTimeoutMs = 20 * 60 * 1_000;
-const quickTestTimeoutMs = 2 * 60 * 1_000;
 let active: ChildProcess | null = null;
 let starting = false;
 let abortRequested = false;
@@ -119,10 +117,7 @@ export async function runAutoCalibration(
       let stderr = "";
       let pendingLine = "";
       let settled = false;
-      let timedOut = false;
-      let quickTestStarted = false;
       let lastNativeProgressAt = 0;
-      let forcedFinish: ReturnType<typeof setTimeout> | undefined;
       const child = spawn(executable, args, {
         shell: false,
         windowsHide: true,
@@ -134,28 +129,10 @@ export async function runAutoCalibration(
       const finish = (error?: Error, result?: AutoCalibrationResult) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
-        clearTimeout(forcedFinish);
         if (active === child) active = null;
         if (error) reject(error);
         else resolve(result!);
       };
-      const onTimeout = () => {
-        timedOut = true;
-        cancelAutoCalibration();
-        forcedFinish = setTimeout(
-          () =>
-            finish(
-              new Error(
-                quickTestStarted
-                  ? "The quick calibration test reached its two-minute limit. Choose Windowing or a smaller model, or use manual settings."
-                  : "The full dataset context scan exceeded 20 minutes. Choose Windowing or a smaller dataset.",
-              ),
-            ),
-          10_000,
-        );
-      };
-      let timer = setTimeout(onTimeout, scanTimeoutMs);
       child.stdout?.on("data", (chunk: Buffer) => {
         stdout = (stdout + chunk.toString("utf8")).slice(-outputLimit);
       });
@@ -170,14 +147,6 @@ export async function runAutoCalibration(
             line,
           );
           if (status) onProgress(status[1].slice(0, 180));
-          if (
-            !quickTestStarted &&
-            /^osai: calibration phase=hardware\b/.test(line)
-          ) {
-            quickTestStarted = true;
-            clearTimeout(timer);
-            timer = setTimeout(onTimeout, quickTestTimeoutMs);
-          }
           const scan = /^osai: full content scan records=(\d+)$/.exec(line);
           if (scan) onProgress(`Scanning training data: ${scan[1]} records`);
           if (!status && !scan && Date.now() - lastNativeProgressAt >= 1_000) {
@@ -195,16 +164,6 @@ export async function runAutoCalibration(
       });
       child.once("error", (error) => finish(error));
       child.once("close", (code) => {
-        if (timedOut) {
-          finish(
-            new Error(
-              quickTestStarted
-                ? "The quick calibration test reached its two-minute limit. Choose Windowing or a smaller model, or use manual settings."
-                : "The full dataset context scan exceeded 20 minutes. Choose Windowing or a smaller dataset.",
-            ),
-          );
-          return;
-        }
         if (abortRequested) {
           finish(new Error("Calibration cancelled"));
           return;
