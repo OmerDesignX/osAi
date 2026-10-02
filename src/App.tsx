@@ -1926,11 +1926,12 @@ export function App() {
                     <div className="setting-heading">
                       <strong>Context</strong>
                       <SettingInfo label="context mode">
-                        Full scans every selected training file before
-                        calibration and fits the longest record in one context
-                        if the model and memory allow it. Windowing splits long
-                        records into overlapping windows without dropping answer
-                        tokens.
+                        Full scans every selected training file and sets the
+                        longest record as the context ceiling. Structured GGUF
+                        records stay compact and skip work after their last
+                        answer token. The longest record must still fit the
+                        model and GPU memory. Windowing splits long records into
+                        overlapping windows without dropping answer tokens.
                       </SettingInfo>
                     </div>
                     <div className="segmented two" aria-label="Context mode">
@@ -1963,7 +1964,7 @@ export function App() {
                     </div>
                     <small>
                       {form.fullContentContext
-                        ? "Scan every record, then calibrate for the longest context."
+                        ? "Keep short records compact; fit the longest record in full."
                         : "Use overlapping windows for long records."}
                     </small>
                   </div>

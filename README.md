@@ -118,6 +118,10 @@ The GGUF model tokenizer determines its exact token count. If that context
 exceeds the model limit or cannot fit device memory, calibration reports the
 limit instead of silently changing modes. Select **Windowing** to train long
 records as overlapping windows; every supervised answer token remains covered.
+Assistant-supervised GGUF training stores each record at its actual token length
+and pads only the active batch. It stops work after the record's last supervised
+token. The longest record still sets the native context and must fit on the
+selected GPU.
 
 Choose a complete VLM under **Custom model** for media training. For a GGUF VLM,
 the same custom model folder must also contain its matching quantized MLX VLM;
