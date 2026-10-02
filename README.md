@@ -64,7 +64,7 @@ The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SD
 3. Leave **Engine**, **Accelerator**, and **Multi-GPU** on **Auto** for hardware-aware selection, or choose them manually.
 4. Under **Pipeline**, press **Fine-tune**, **Align**, or **Fine-tune + align**.
 5. Press the dataset browse button and select a `.json`, `.jsonl`, `.ndjson`, or `.parquet` file, or a folder containing data files.
-6. Keep **Fit settings to this hardware** enabled and press **Calibrate**. osAi samples short excerpts from the selected files locally, tests cautious learning rates with the training backend, and unlocks **Quick Settings** when the pilot loss decreases. The selected data is not changed and the full records are used for training.
+6. Keep **Fit settings to this hardware** enabled and press **Calibrate**. In the default **Full** context mode, osAi first scans every selected training file for its longest tokenized record and checks the model's context limit. It then fits the hardware and tests cautious learning rates with short local excerpts. **Quick Settings** unlocks when the pilot loss decreases. The selected data is not changed.
 7. Enter a recognizable **Session name**, or leave the suggested name in place.
 8. Choose **Save sessions in** when a different location is needed. The default is `~/osAi/sessions` in the user's home folder.
 9. Press **Start training** after calibration completes. Changing the model, dataset, optimizer, epoch count, context mode, or GPUs requires calibration again.
@@ -104,13 +104,12 @@ fine-tuning** or **Use for alignment** returns that copy to the training form;
 hardware fitting uses the model and available hardware; the dataset's row count
 and token-limit recommendation do not change the Auto training profile.
 
-The **Context** control offers **Windowing** (default) and **Full**. Full scans
-all training records and requests a context that holds the largest one.
-The model tokenizer determines the count. Overlapping windows remain the
-default because a full record can exceed the model's context limit or device
-memory. If Auto encounters a device memory limit, it retries with smaller
-windows and shows that adjustment in the session status. All supervised answer
-tokens still train through overlapping windows.
+The **Context** control defaults to **Full**. Full scans all selected training
+files before calibration and requests enough context for the largest record.
+The GGUF model tokenizer determines its exact token count. If that context
+exceeds the model limit or cannot fit device memory, calibration reports the
+limit instead of silently changing modes. Select **Windowing** to train long
+records as overlapping windows; every supervised answer token remains covered.
 
 Choose a complete VLM under **Custom model** for media training. For a GGUF VLM,
 the same custom model folder must also contain its matching quantized MLX VLM;

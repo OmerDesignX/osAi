@@ -52,7 +52,11 @@ export function autoCalibrationArgs(input: TrainingRequest) {
     "--optimizer",
     input.optimizer,
   ];
-  if (input.fullContentContext) args.push("--full-content-context");
+  args.push(
+    input.fullContentContext
+      ? "--full-content-context"
+      : "--no-full-content-context",
+  );
   if (input.scale !== null) args.push("--scale", String(input.scale));
   if (input.dropout !== null) args.push("--dropout", String(input.dropout));
   if (input.seed !== null) args.push("--seed", String(input.seed));
@@ -159,6 +163,8 @@ export async function runAutoCalibration(
             line,
           );
           if (status) onProgress(status[1].slice(0, 180));
+          const scan = /^osai: full content scan records=(\d+)$/.exec(line);
+          if (scan) onProgress(`Scanning training data: ${scan[1]} records`);
         }
       });
       child.once("error", (error) => finish(error));

@@ -498,8 +498,12 @@ export async function buildOsAiArgs(
 
   const needsFineTune = input.stage !== "alignment";
   const needsAlignment = input.stage !== "fine-tuning";
-  if (input.fullContentContext && needsFineTune)
-    args.push("--full-content-context");
+  if (needsFineTune)
+    args.push(
+      input.fullContentContext
+        ? "--full-content-context"
+        : "--no-full-content-context",
+    );
   if (!input.autoSettings || input.calibrationApplied) {
     pushOptional(
       args,

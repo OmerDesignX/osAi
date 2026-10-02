@@ -39,6 +39,7 @@ test("calibration uses the selected dataset, devices and context mode", () => {
   );
   assert.equal(args.filter((value) => value === "--device").length, 2);
   assert.equal(args.includes("--full-content-context"), false);
+  assert.equal(args.includes("--no-full-content-context"), true);
   assert.equal(
     autoCalibrationArgs({ ...request, fullContentContext: true }).includes(
       "--full-content-context",

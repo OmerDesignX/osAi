@@ -235,7 +235,7 @@ const defaults: TrainingRequest = {
   alignmentType: "auto",
   optimizer: "auto",
   autoSettings: true,
-  fullContentContext: false,
+  fullContentContext: true,
   autoStop: true,
   multiGpu: "auto",
   liveRollouts: true,
@@ -1775,11 +1775,11 @@ export function App() {
                     <div className="setting-heading">
                       <strong>Context</strong>
                       <SettingInfo label="context mode">
-                        Windowing splits long records into overlapping training
-                        windows without dropping their answer tokens. Full scans
-                        the dataset and requests enough context for its longest
-                        record. Full needs more memory and cannot exceed the
-                        model's context limit.
+                        Full scans every selected training file before
+                        calibration and fits the longest record in one context
+                        if the model and memory allow it. Windowing splits long
+                        records into overlapping windows without dropping answer
+                        tokens.
                       </SettingInfo>
                     </div>
                     <div className="segmented two" aria-label="Context mode">
@@ -1812,7 +1812,7 @@ export function App() {
                     </div>
                     <small>
                       {form.fullContentContext
-                        ? "Use the longest record if the model and memory allow it."
+                        ? "Scan every record, then calibrate for the longest context."
                         : "Use overlapping windows for long records."}
                     </small>
                   </div>

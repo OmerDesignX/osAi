@@ -606,6 +606,7 @@ test("passes a Parquet file and full-content request to the CLI", async () => {
     );
     assert.equal(args[args.indexOf("--data") + 1], source);
     assert.equal(args.includes("--full-content-context"), true);
+    assert.equal(args.includes("--no-full-content-context"), false);
     assert.equal(args.includes("--auto-settings"), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -636,6 +637,7 @@ test("a calibrated auto run keeps the pilot's memory settings and learning rate"
       path.join(root, "sessions"),
     );
     assert.equal(args.includes("--auto-settings"), true);
+    assert.equal(args.includes("--no-full-content-context"), true);
     for (const [flag, value] of [
       ["--batch-size", "2"],
       ["--max-seq-length", "512"],
