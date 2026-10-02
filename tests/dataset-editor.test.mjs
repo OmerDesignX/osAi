@@ -27,7 +27,10 @@ test("training summary counts all supported files, including Parquet, without re
     assert.equal(summary.fileCount, 2);
     assert.equal(summary.totalBytes, 12);
     assert.match(summary.signature, /^[0-9a-f]{64}$/);
+    const trainingFile = path.join(root, "train.jsonl");
+    const original = await fs.stat(trainingFile);
     await fs.writeFile(path.join(root, "train.jsonl"), "12346");
+    await fs.utimes(trainingFile, original.atime, original.mtime);
     assert.notEqual(
       (await datasetTrainingSummary(root)).signature,
       summary.signature,

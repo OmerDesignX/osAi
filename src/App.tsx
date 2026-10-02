@@ -43,6 +43,14 @@ import { LossChart, type LossAxis } from "./LossChart.js";
 
 type IconName = keyof typeof feather.icons;
 
+type FooterActivity = {
+  message: string;
+  percent: number | null;
+  label: string;
+  icon: IconName;
+  kind: "active" | "idle" | "installing" | "setup-needed";
+};
+
 function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   const markup = feather.icons[name].toSvg({
     width: size,
@@ -1448,17 +1456,115 @@ export function App() {
             : backendInstall.state === "error"
               ? "Try installation again"
               : "Install osAi";
-  const footerIndeterminate =
-    calibrationBusy ||
-    benchmarkBusy ||
-    starting ||
-    Boolean(active?.indeterminate) ||
-    (backendInstallBusy && typeof backendInstall.percent !== "number");
-  const footerPercent = active
-    ? active.progress
-    : backendInstallBusy && typeof backendInstall.percent === "number"
-      ? backendInstall.percent
-      : 0;
+  const activeInProgress =
+    active &&
+    ["queued", "running", "pausing", "stopping"].includes(active.status);
+  const footerActivity: FooterActivity = (() => {
+    if (calibrationBusy)
+      return {
+        message: `Calibration · ${calibrationMessage}`,
+        percent: null,
+        label: "Working",
+        icon: "activity",
+        kind: "active",
+      };
+    if (starting)
+      return {
+        message: "Preparing and checking the selected training data…",
+        percent: null,
+        label: "Working",
+        icon: "activity",
+        kind: "active",
+      };
+    if (activeInProgress)
+      return {
+        message: `${active.name} · ${active.message}`,
+        percent: active.indeterminate ? null : active.progress,
+        label: active.indeterminate
+          ? "Working"
+          : `${active.progress.toFixed(1)}%`,
+        icon: "activity",
+        kind: "active",
+      };
+    if (backendInstallBusy)
+      return {
+        message: `osAi CLI setup · ${backendInstall.message}`,
+        percent:
+          typeof backendInstall.percent === "number"
+            ? backendInstall.percent
+            : null,
+        label:
+          typeof backendInstall.percent === "number"
+            ? `${backendInstall.percent}%`
+            : "Working",
+        icon: "download",
+        kind: "installing",
+      };
+    if (updateBusy)
+      return {
+        message: `App update · ${update.message}`,
+        percent:
+          update.state === "downloading" && typeof update.percent === "number"
+            ? update.percent
+            : null,
+        label:
+          update.state === "downloading" && typeof update.percent === "number"
+            ? `${update.percent}%`
+            : "Working",
+        icon: "download",
+        kind: "installing",
+      };
+    if (benchmarkBusy)
+      return {
+        message: "Measuring the model and available hardware…",
+        percent: null,
+        label: "Working",
+        icon: "activity",
+        kind: "active",
+      };
+    if (datasetSummaryPending)
+      return {
+        message: "Inspecting the selected training data…",
+        percent: null,
+        label: "Working",
+        icon: "activity",
+        kind: "active",
+      };
+    if (backend === null || backendChecking)
+      return {
+        message: "Checking osAi CLI…",
+        percent: null,
+        label: "Working",
+        icon: "download",
+        kind: "setup-needed",
+      };
+    if (active)
+      return {
+        message: `${active.name} · ${active.message}`,
+        percent: active.progress,
+        label: `${active.progress.toFixed(1)}%`,
+        icon: "activity",
+        kind: "active",
+      };
+    if (backendReady)
+      return {
+        message: "Ready",
+        percent: 0,
+        label: "Local",
+        icon: "check",
+        kind: "idle",
+      };
+    return {
+      message:
+        backendInstall.state === "error"
+          ? "osAi CLI setup failed"
+          : backend.message || backendInstall.message,
+      percent: 0,
+      label: "Setup",
+      icon: "download",
+      kind: "setup-needed",
+    };
+  })();
 
   return (
     <div
@@ -3547,63 +3653,31 @@ export function App() {
         </main>
       )}
 
-      <footer
-        className={
-          "statusbar " +
-          (active
-            ? "active"
-            : backendReady
-              ? "idle"
-              : backendInstallBusy
-                ? "installing"
-                : "setup-needed")
-        }
-      >
-        <div className="progress-copy">
-          <Icon
-            name={
-              calibrationBusy || benchmarkBusy || active
-                ? "activity"
-                : backendReady
-                  ? "check"
-                  : "download"
-            }
-          />
-          <span>
-            {calibrationBusy
-              ? `Calibration · ${calibrationMessage}`
-              : starting
-                ? "Preparing and checking the selected training data…"
-                : active
-                  ? active.name + " · " + active.message
-                  : benchmarkBusy
-                    ? "Measuring the model and available hardware…"
-                    : backendReady
-                      ? "Ready"
-                      : backend === null || backendChecking
-                        ? "Checking osAi CLI"
-                        : backendInstall.state === "error"
-                          ? "osAi CLI setup failed"
-                          : backend?.message || backendInstall.message}
-          </span>
+      <footer className={`statusbar ${footerActivity.kind}`}>
+        <div className="progress-copy" aria-live="polite">
+          <Icon name={footerActivity.icon} />
+          <span>{footerActivity.message}</span>
         </div>
-        <div className="status-track">
+        <div
+          className="status-track"
+          role="progressbar"
+          aria-label={footerActivity.message}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={
+            footerActivity.percent === null
+              ? undefined
+              : Math.max(0, Math.min(100, footerActivity.percent))
+          }
+        >
           <span
-            className={footerIndeterminate ? "indeterminate" : ""}
-            style={{ width: `${Math.max(0, Math.min(100, footerPercent))}%` }}
+            className={footerActivity.percent === null ? "indeterminate" : ""}
+            style={{
+              width: `${Math.max(0, Math.min(100, footerActivity.percent ?? 0))}%`,
+            }}
           />
         </div>
-        <span className="status-percent">
-          {calibrationBusy || starting || benchmarkBusy
-            ? "Working"
-            : active
-              ? `${active.progress.toFixed(1)}%`
-              : backendReady
-                ? "Local"
-                : typeof backendInstall.percent === "number"
-                  ? `${backendInstall.percent}%`
-                  : "Setup"}
-        </span>
+        <span className="status-percent">{footerActivity.label}</span>
       </footer>
 
       {hardwareSheetOpen && (

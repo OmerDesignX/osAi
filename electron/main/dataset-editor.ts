@@ -222,8 +222,30 @@ export async function datasetTrainingSummary(source: string) {
     files.map(async ({ file }) => ({ file, stats: await fs.stat(file) })),
   );
   const signature = createHash("sha256");
-  for (const { file, stats } of details)
+  for (const { file, stats } of details) {
     signature.update(JSON.stringify([file, stats.size, stats.mtimeMs]) + "\n");
+    // A same-size edit can share a timestamp on Windows. Hash bounded file
+    // edges without parsing or loading large training datasets.
+    const handle = await fs.open(file, "r");
+    try {
+      const sampleBytes = Math.min(4096, stats.size);
+      const first = Buffer.alloc(sampleBytes);
+      const head = await handle.read(first, 0, sampleBytes, 0);
+      signature.update(first.subarray(0, head.bytesRead));
+      if (stats.size > sampleBytes) {
+        const last = Buffer.alloc(sampleBytes);
+        const tail = await handle.read(
+          last,
+          0,
+          sampleBytes,
+          stats.size - sampleBytes,
+        );
+        signature.update(last.subarray(0, tail.bytesRead));
+      }
+    } finally {
+      await handle.close();
+    }
+  }
   return {
     fileCount: files.length,
     totalBytes: details.reduce((total, item) => total + item.stats.size, 0),

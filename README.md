@@ -70,10 +70,12 @@ The native llama.cpp build selects Metal on macOS, CUDA and Vulkan when their SD
 9. Press **Start training** after calibration completes. Changing the model, dataset, optimizer, epoch count, context mode, or GPUs requires calibration again.
 
 The bottom bar is the single progress display for setup, hardware fitting,
-calibration, and training. It shows the current step; stages without a reliable
-total use a moving indicator. Open **Hardware** in the top strip to see the CPU
-and each detected GPU. Live memory, load, and temperature appear when the
-device driver exposes them.
+calibration, training, and app updates. It shows the current step; stages without
+a reliable total use a moving indicator. Open **Hardware** in the top strip to
+see the CPU and each detected GPU. NVIDIA and available AMD SMI drivers provide
+live GPU memory, load, and temperature. Vulkan and Metal still list GPUs when
+their drivers do not expose these sensors. Apple silicon uses shared system
+memory, so total host memory is not presented as GPU memory usage.
 
 While a run is active, **Start training** becomes **Pause training**, **Save checkpoint**, and **Stop training**. A paused run can be resumed from the same controls. **Save checkpoint** writes the current adapter at the next safe optimizer step; a paused run finishes its save after resuming. The session shows when the latest adapter and reusable model are ready. Automatic saves replace the same latest checkpoint rather than collecting numbered copies. An official model is downloaded and verified only when the selected MLX or GGUF variant is not already present. Individual split shards, MLX files, and V2 GGUF projectors are downloaded from the selected V1/V2 catalog and checked against its published SHA-256 list. The active session displays its phase, progress, and live output. Its complete configuration is restored when the app reopens or that session is selected again.
 

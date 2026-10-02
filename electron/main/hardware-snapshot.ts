@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 import type { HardwareSnapshot, GpuSnapshot } from "../types.js";
 
@@ -102,6 +104,102 @@ async function nvidiaGpus(): Promise<GpuSnapshot[]> {
   return parseNvidiaGpus(report);
 }
 
+function metricNumber(value: string | undefined): number | null {
+  const match = /^\s*(-?\d+(?:\.\d+)?)/.exec(value || "");
+  return match ? Number(match[1]) : null;
+}
+
+function memoryBytes(
+  value: string | undefined,
+  defaultUnit = "MB",
+): number | null {
+  const amount = metricNumber(value);
+  if (amount === null) return null;
+  const unit =
+    /\b(KiB|MiB|GiB|KB|MB|GB|B)\b/i.exec(value || "")?.[1] || defaultUnit;
+  const multiplier: Record<string, number> = {
+    B: 1,
+    KB: 1_000,
+    KIB: 1024,
+    MB: 1_000_000,
+    MIB: 1024 ** 2,
+    GB: 1_000_000_000,
+    GIB: 1024 ** 3,
+  };
+  return amount * multiplier[unit.toUpperCase()];
+}
+
+export function parseAmdMonitorCsv(report: string): GpuSnapshot[] {
+  const rows = report
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.split(",").map((value) => value.trim()));
+  const headerIndex = rows.findIndex((row) =>
+    row.some((column) => column.toUpperCase() === "GPU"),
+  );
+  if (headerIndex < 0) return [];
+  const headers = rows[headerIndex].map((value) =>
+    value.toUpperCase().replace(/[^A-Z0-9]/g, "_"),
+  );
+  const field = (row: string[], names: string[]) => {
+    const index = headers.findIndex((header) => names.includes(header));
+    return index < 0 ? undefined : row[index];
+  };
+  return rows.slice(headerIndex + 1).flatMap((row) => {
+    const index = metricNumber(field(row, ["GPU"]));
+    if (index === null || !Number.isInteger(index)) return [];
+    const usage = field(row, ["VRAM_USAGE", "GTT_USAGE"]);
+    const parts = usage?.split("/");
+    const sharedUnit =
+      /\b(KiB|MiB|GiB|KB|MB|GB|B)\b/i.exec(parts?.[1] || "")?.[1] || "MB";
+    return [
+      {
+        id: `amd-${index}`,
+        name: `AMD GPU ${index}`,
+        backend: "AMD SMI",
+        memoryTotalBytes: memoryBytes(
+          field(row, ["VRAM_TOTAL"]) || parts?.[1],
+          sharedUnit,
+        ),
+        memoryUsedBytes: memoryBytes(
+          field(row, ["VRAM_USED"]) || parts?.[0],
+          sharedUnit,
+        ),
+        utilizationPercent:
+          metricNumber(field(row, ["GFX_UTIL", "GFX_"])) ?? null,
+        temperatureC: metricNumber(field(row, ["GPU_TEMP", "GPU_T"])) ?? null,
+        note: `AMD SMI GPU ${index}`,
+      },
+    ];
+  });
+}
+
+async function amdGpus(): Promise<GpuSnapshot[]> {
+  return parseAmdMonitorCsv(await output("amd-smi", ["monitor", "--csv"]));
+}
+
+export function mergeAmdTelemetry(
+  gpus: GpuSnapshot[],
+  telemetry: GpuSnapshot[],
+) {
+  const identified = gpus.filter((gpu) =>
+    /\bAMD\b|Radeon|Instinct/i.test(gpu.name),
+  );
+  if (identified.length !== telemetry.length) {
+    gpus.push(...telemetry);
+    return;
+  }
+  for (const [index, reading] of telemetry.entries()) {
+    Object.assign(identified[index], {
+      memoryTotalBytes: reading.memoryTotalBytes,
+      memoryUsedBytes: reading.memoryUsedBytes,
+      utilizationPercent: reading.utilizationPercent,
+      temperatureC: reading.temperatureC,
+      note: reading.note,
+    });
+  }
+}
+
 export function parseVulkanGpus(report: string): GpuSnapshot[] {
   return [
     ...report.matchAll(
@@ -153,17 +251,17 @@ async function windowsGpus(): Promise<GpuSnapshot[]> {
   }
 }
 
-async function metalGpus(): Promise<GpuSnapshot[]> {
-  const report = await output(
-    "system_profiler",
-    ["SPDisplaysDataType", "-json"],
-    8_000,
-  );
+export function parseMetalGpus(
+  report: string,
+  architecture: string,
+  systemMemoryBytes: number,
+): GpuSnapshot[] {
   try {
     const entries = JSON.parse(report).SPDisplaysDataType as Record<
       string,
       unknown
     >[];
+    if (!Array.isArray(entries)) return [];
     return entries.map((item, index) => {
       const name = String(item.sppci_model || item._name || `GPU ${index + 1}`);
       const vram = String(
@@ -172,18 +270,23 @@ async function metalGpus(): Promise<GpuSnapshot[]> {
       const amount = /([\d.]+)\s*(GB|MB)/i.exec(vram);
       const multiplier =
         amount?.[2].toUpperCase() === "GB" ? 1024 ** 3 : 1024 ** 2;
-      const unified = process.arch === "arm64" && /shared|unified/i.test(vram);
+      const unified =
+        architecture === "arm64" &&
+        (Boolean(item.spdisplays_vram_shared) ||
+          /shared|unified/i.test(vram) ||
+          /Apple/i.test(name));
       const external = /external|eGPU/i.test(JSON.stringify(item));
       return {
         id: `metal-${index}`,
         name,
         backend: "Metal",
         memoryTotalBytes: unified
-          ? os.totalmem()
+          ? systemMemoryBytes
           : amount
             ? Number(amount[1]) * multiplier
             : null,
-        memoryUsedBytes: unified ? os.totalmem() - os.freemem() : null,
+        // Unified memory is shared with the CPU; host use is not GPU use.
+        memoryUsedBytes: null,
         utilizationPercent: null,
         temperatureC: null,
         note: external
@@ -198,19 +301,58 @@ async function metalGpus(): Promise<GpuSnapshot[]> {
   }
 }
 
+async function metalGpus(): Promise<GpuSnapshot[]> {
+  const report = await output(
+    "system_profiler",
+    ["SPDisplaysDataType", "-json"],
+    8_000,
+  );
+  return parseMetalGpus(report, process.arch, os.totalmem());
+}
+
+async function linuxCpuTemperature(): Promise<number | null> {
+  try {
+    const root = "/sys/class/hwmon";
+    const sensors = await fs.readdir(root);
+    const readings: number[] = [];
+    for (const sensor of sensors) {
+      const directory = path.join(root, sensor);
+      const name = (
+        await fs.readFile(path.join(directory, "name"), "utf8")
+      ).trim();
+      if (!/^(coretemp|k10temp|zenpower|cpu_thermal|soc_thermal)$/i.test(name))
+        continue;
+      for (const file of await fs.readdir(directory)) {
+        if (!/^temp\d+_input$/.test(file)) continue;
+        const value =
+          Number(
+            (await fs.readFile(path.join(directory, file), "utf8")).trim(),
+          ) / 1000;
+        if (Number.isFinite(value) && value >= 0 && value <= 125)
+          readings.push(value);
+      }
+    }
+    return readings.length ? Math.max(...readings) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function hardwareSnapshot(): Promise<HardwareSnapshot> {
   const gpus: GpuSnapshot[] = [];
   if (process.platform === "darwin") {
     mergeGpuInventory(gpus, await metalGpus());
   } else {
-    const [nvidia, vulkan, system] = await Promise.all([
+    const [nvidia, vulkan, system, amd] = await Promise.all([
       nvidiaGpus(),
       vulkanGpus(),
       process.platform === "win32" ? windowsGpus() : Promise.resolve([]),
+      amdGpus(),
     ]);
     mergeGpuInventory(gpus, system);
     mergeGpuInventory(gpus, vulkan);
     mergeGpuInventory(gpus, nvidia);
+    mergeAmdTelemetry(gpus, amd);
   }
   return {
     sampledAt: new Date().toISOString(),
@@ -220,7 +362,8 @@ export async function hardwareSnapshot(): Promise<HardwareSnapshot> {
       utilizationPercent: cpuUsage(),
       memoryTotalBytes: os.totalmem(),
       memoryUsedBytes: os.totalmem() - os.freemem(),
-      temperatureC: null,
+      temperatureC:
+        process.platform === "linux" ? await linuxCpuTemperature() : null,
     },
     gpus,
   };
