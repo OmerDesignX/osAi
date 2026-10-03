@@ -16,10 +16,10 @@ import type {
   Preferences,
   TrainingRequest,
 } from "../types.js";
+import { calibrationKey } from "../calibration-key.js";
 import { BackendInstaller } from "./backend-installer.js";
 import { readAutoDevices, runAutoBenchmark } from "./auto-benchmark.js";
 import {
-  calibrationKey,
   cancelAutoCalibration,
   runAutoCalibration,
 } from "./auto-calibration.js";

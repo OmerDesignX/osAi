@@ -11,33 +11,6 @@ let active: ChildProcess | null = null;
 let starting = false;
 let abortRequested = false;
 
-export function calibrationKey(input: TrainingRequest) {
-  return JSON.stringify([
-    input.modelSource,
-    input.modelVersion,
-    input.tier,
-    input.customModelFolder,
-    input.engine,
-    input.accelerator,
-    input.multiGpu,
-    input.devices,
-    input.fineTuneData,
-    input.fullContentContext,
-    input.optimizer,
-    input.iterations,
-    input.scale,
-    input.dropout,
-    input.seed,
-    input.gradientAccumulationSteps,
-    input.gradientCheckpoint,
-    input.maskPrompt,
-    input.splitMode,
-    input.tensorSplit,
-    input.mainGpu,
-    input.distributedWorkers,
-  ]);
-}
-
 export function autoCalibrationArgs(input: TrainingRequest) {
   if (!path.isAbsolute(input.fineTuneData))
     throw new Error("Choose a fine-tuning dataset before calibration");
@@ -92,6 +65,27 @@ export function cancelAutoCalibration() {
       child.kill();
     }
   }
+}
+
+export function validateAutoCalibrationResult(
+  value: unknown,
+): AutoCalibrationResult {
+  const result = value as AutoCalibrationResult | null;
+  if (
+    !result ||
+    !result.settings ||
+    !Number.isInteger(result.settings.max_seq_length) ||
+    result.settings.max_seq_length <= 0 ||
+    !Number.isFinite(result.learning_rate) ||
+    result.learning_rate <= 0 ||
+    !Number.isFinite(result.first_loss) ||
+    !Number.isFinite(result.last_loss) ||
+    result.last_loss >= result.first_loss ||
+    !Number.isFinite(result.improvement_percent) ||
+    result.improvement_percent <= 0
+  )
+    throw new Error("osAi CLI returned invalid calibration measurements");
+  return result;
 }
 
 export async function runAutoCalibration(
@@ -177,18 +171,7 @@ export async function runAutoCalibration(
           return;
         }
         try {
-          const result = JSON.parse(stdout) as AutoCalibrationResult;
-          if (
-            !result.settings ||
-            !Number.isInteger(result.settings.max_seq_length) ||
-            !Number.isFinite(result.learning_rate) ||
-            result.learning_rate <= 0 ||
-            !Number.isFinite(result.improvement_percent) ||
-            result.improvement_percent < 0.2
-          )
-            throw new Error(
-              "osAi CLI returned invalid calibration measurements",
-            );
+          const result = validateAutoCalibrationResult(JSON.parse(stdout));
           finish(undefined, result);
         } catch (error) {
           finish(error instanceof Error ? error : new Error(String(error)));

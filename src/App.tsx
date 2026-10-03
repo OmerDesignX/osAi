@@ -8,6 +8,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import feather from "feather-icons";
+import { calibrationKey } from "../electron/calibration-key.js";
 import type {
   AlignmentType,
   AutoCalibrationResult,
@@ -517,32 +518,7 @@ export function App() {
     datasetSource &&
     (datasetSummaryBusy || (!currentDatasetSummary && !datasetSummaryError)),
   );
-  const calibrationSignature = JSON.stringify([
-    form.modelSource,
-    form.modelVersion,
-    form.tier,
-    form.customModelFolder,
-    form.engine,
-    form.accelerator,
-    form.multiGpu,
-    form.devices,
-    form.fineTuneData,
-    form.fullContentContext,
-    form.optimizer,
-    form.iterations,
-    form.scale,
-    form.dropout,
-    form.seed,
-    form.gradientAccumulationSteps,
-    form.gradientCheckpoint,
-    form.maskPrompt,
-    form.splitMode,
-    form.tensorSplit,
-    form.mainGpu,
-    form.distributedWorkers,
-    currentDatasetSummary?.signature ?? null,
-    deviceSignature,
-  ]);
+  const calibrationSignature = calibrationKey(form);
   const currentCalibration =
     calibration?.key === calibrationSignature &&
     form.autoSettings &&
@@ -2161,7 +2137,7 @@ export function App() {
                         ? calibrationMessage
                         : currentCalibration
                           ? calibrationMessage ||
-                            `Pilot loss fell ${currentCalibration.improvement_percent.toFixed(1)}%. Ready to train.`
+                            `Pilot loss fell ${currentCalibration.improvement_percent.toFixed(2)}%. Ready to train.`
                           : form.fineTuneData
                             ? "Calibrate to measure a safe learning rate on the selected data."
                             : "Select training data, then calibrate."}

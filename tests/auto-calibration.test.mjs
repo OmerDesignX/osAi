@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   autoCalibrationArgs,
-  calibrationKey,
+  validateAutoCalibrationResult,
 } from "../dist-electron/main/auto-calibration.js";
+import { calibrationKey } from "../dist-electron/calibration-key.js";
 
 const request = {
   modelSource: "official",
@@ -91,4 +92,38 @@ test("calibration pilots advanced runtime settings used by training", () => {
     assert.equal(args[args.indexOf(flag) + 1], value);
   assert.ok(args.includes("--no-gradient-checkpointing"));
   assert.ok(args.includes("--no-mask-prompt"));
+});
+
+test("a small verified pilot decline is ready for training", () => {
+  const pilot = {
+    settings: { max_seq_length: 1024 },
+    learning_rate: 1e-5,
+    first_loss: 3.703472,
+    last_loss: 3.701817,
+    improvement_percent: 0.0447,
+  };
+  assert.equal(validateAutoCalibrationResult(pilot), pilot);
+  for (const invalid of [
+    { ...pilot, last_loss: pilot.first_loss },
+    { ...pilot, improvement_percent: 0 },
+    { ...pilot, learning_rate: 0 },
+    { ...pilot, settings: { max_seq_length: 0 } },
+  ])
+    assert.throws(
+      () => validateAutoCalibrationResult(invalid),
+      /invalid calibration measurements/,
+    );
+});
+
+test("background inventory refresh does not invalidate the approved request", () => {
+  const key = calibrationKey(request);
+  assert.equal(
+    calibrationKey({
+      ...request,
+      deviceSignature: "refreshed hardware inventory",
+      datasetSignature: "refreshed dataset summary",
+    }),
+    key,
+  );
+  assert.equal(calibrationKey({ ...request, learningRate: 5e-6 }), key);
 });
