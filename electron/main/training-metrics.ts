@@ -28,6 +28,8 @@ export function lossMetric(
   const mlx = mlxTable ? /^\s*\d[\d,]*\s+([\d.eE+-]+)\s/.exec(raw) : null;
   const value = finite(loss?.[1] ?? mlx?.[1]);
   if (value === null || percent < 0 || percent > 100) return null;
+  // Older native builds print loss=0 before they have seen a supervised label.
+  if (loss && value === 0 && /\bacc=-?nan\b/i.test(raw)) return null;
   const accuracy = /\bacc=([\d.eE+-]+)(?:[±\uFFFD]([\d.eE+-]+))?%?/i.exec(raw);
   const stepText =
     /\bdata\s*=\s*([\d,]+)\s*\//i.exec(raw)?.[1] ||
@@ -75,6 +77,14 @@ export function parseMetricRow(raw: string): TrainingMetric | null {
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) return null;
   const step = fields.length === 9 && fields[8] ? Number(fields[8]) : null;
   if (step !== null && (!Number.isSafeInteger(step) || step < 0)) return null;
+  if (
+    fields[7] === "loss" &&
+    fields[3] === "0" &&
+    fields[4] === "" &&
+    fields[5] === "" &&
+    fields[6] === ""
+  )
+    return null;
   return {
     time: fields[0],
     percent,

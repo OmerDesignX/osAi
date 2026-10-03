@@ -34,3 +34,21 @@ test("reads older replacement glyphs in a training log", () => {
   assert.equal(metric.lossUncertainty, 0.1);
   assert.equal(metric.accuracyUncertainty, 2);
 });
+
+test("ignores native progress before any supervised label", () => {
+  assert.equal(
+    lossMetric(
+      "[CUDA1] train: data=1928/265303589 loss=0.00000±nan acc=-nan(ind)±nan%",
+      0,
+    ),
+    null,
+  );
+  assert.equal(
+    lossMetric("train: data=1/100 loss=pending acc=pending", 0),
+    null,
+  );
+  assert.equal(
+    parseMetricRow("2026-10-03T13:11:06.756Z,0,CUDA1,0,,,,loss,1"),
+    null,
+  );
+});
