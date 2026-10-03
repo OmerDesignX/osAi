@@ -31,6 +31,21 @@ test("notifications reveal complete cleaned error details", async () => {
   assert.match(app, /<pre>\{notice\}<\/pre>/);
 });
 
+test("failed sessions show a readable banner and an in-app log sheet", async () => {
+  const [app, styles] = await Promise.all([
+    fs.readFile("src/App.tsx", "utf8"),
+    fs.readFile("src/styles.css", "utf8"),
+  ]);
+  assert.match(app, /className="session-error" role="alert"/);
+  assert.match(app, /setErrorLogSessionId\(selected\.id\)/);
+  assert.match(app, /View log/);
+  assert.match(app, /className="hardware-sheet session-log-sheet"/);
+  assert.match(app, /\{selected\.logPath\}/);
+  assert.match(app, /className="session-log-sheet-output"/);
+  assert.match(styles, /\.session-error-actions\s*\{/);
+  assert.match(styles, /\.session-log-sheet-output\s*\{/);
+});
+
 test("backend detection is bounded and first-run setup starts once", async () => {
   const [app, service, main] = await Promise.all([
     fs.readFile("src/App.tsx", "utf8"),

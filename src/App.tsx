@@ -453,6 +453,9 @@ export function App() {
     top: number;
     left: number;
   } | null>(null);
+  const [errorLogSessionId, setErrorLogSessionId] = useState<string | null>(
+    null,
+  );
   const [deleteCandidate, setDeleteCandidate] = useState<SessionState | null>(
     null,
   );
@@ -484,6 +487,7 @@ export function App() {
     () => sessions.find((session) => session.id === selectedId) || null,
     [selectedId, sessions],
   );
+  useEffect(() => setErrorLogSessionId(null), [selected?.id]);
   const active = sessions.find((session) =>
     ["queued", "running", "pausing", "paused", "stopping"].includes(
       session.status,
@@ -657,6 +661,15 @@ export function App() {
   }, [guidanceOpen]);
 
   useEffect(() => window.osai.onCalibrationProgress(setCalibrationMessage), []);
+
+  useEffect(() => {
+    if (!errorLogSessionId) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setErrorLogSessionId(null);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [errorLogSessionId]);
 
   useEffect(() => {
     if (!hardwareSheetOpen) return;
@@ -3447,19 +3460,37 @@ export function App() {
                     </div>
                   )}
                 {selected.error && (
-                  <div className="session-error">
-                    <Icon name="alert-triangle" />
-                    <span>{selected.error}</span>
-                    {selected.status === "failed" && selected.request && (
+                  <div className="session-error" role="alert">
+                    <div className="session-error-content">
+                      <Icon name="alert-triangle" />
+                      <div>
+                        <strong>
+                          {selected.status === "failed"
+                            ? "Training failed"
+                            : "Training needs attention"}
+                        </strong>
+                        <p>{selected.error}</p>
+                      </div>
+                    </div>
+                    <div className="session-error-actions">
                       <button
                         type="button"
-                        onClick={() => setRestartCandidate(selected)}
-                        title="Clear this pipeline and restart with its saved settings"
+                        onClick={() => setErrorLogSessionId(selected.id)}
                       >
-                        <Icon name="rotate-ccw" />
-                        Restart session
+                        <Icon name="file-text" />
+                        View log
                       </button>
-                    )}
+                      {selected.status === "failed" && selected.request && (
+                        <button
+                          type="button"
+                          onClick={() => setRestartCandidate(selected)}
+                          title="Clear this pipeline and restart with its saved settings"
+                        >
+                          <Icon name="rotate-ccw" />
+                          Restart session
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
                 {selected.status === "completed" && sessionArtifacts && (
@@ -3656,6 +3687,60 @@ export function App() {
         </div>
         <span className="status-percent">{footerActivity.label}</span>
       </footer>
+
+      {selected && errorLogSessionId === selected.id && (
+        <div
+          className="hardware-sheet-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget)
+              setErrorLogSessionId(null);
+          }}
+        >
+          <aside
+            className="hardware-sheet session-log-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-log-sheet-title"
+          >
+            <header>
+              <div>
+                <h2 id="session-log-sheet-title">Training error</h2>
+                <p>{selected.name}</p>
+              </div>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close training log"
+                onClick={() => setErrorLogSessionId(null)}
+              >
+                <Icon name="x" />
+              </button>
+            </header>
+            <div className="session-log-sheet-summary">
+              <strong>{selected.error}</strong>
+              <p>
+                {selected.error?.includes(
+                  "gradient batch size must divide the context size",
+                )
+                  ? "The full-context scan selected a token count that did not fit the calibrated GGUF microbatch. Training stopped before its first step. The current CLI fits these settings together; update the CLI and restart this session."
+                  : "The trainer stopped at the step shown below. The recent output includes the command, progress, and last diagnostic messages."}
+              </p>
+            </div>
+            <div className="session-log-sheet-location">
+              <span>Log file</span>
+              <code>{selected.logPath}</code>
+            </div>
+            <div className="session-log-sheet-label">
+              <strong>Recent training output</strong>
+              <span>Updates while this sheet is open</span>
+            </div>
+            <pre className="session-log-sheet-output">
+              {log || "Waiting for osAi output…"}
+            </pre>
+          </aside>
+        </div>
+      )}
 
       {hardwareSheetOpen && (
         <div

@@ -652,6 +652,34 @@ test("a calibrated auto run keeps the pilot's memory settings and learning rate"
   }
 });
 
+test("full-content training keeps the calibrated context and microbatch", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "osai-full-calibrated-"),
+  );
+  const data = path.join(root, "train.jsonl");
+  await fs.writeFile(data, '{"text":"test"}\n');
+  try {
+    const { args } = await buildOsAiArgs(
+      {
+        ...base,
+        stage: "fine-tuning",
+        fineTuneData: data,
+        fullContentContext: true,
+        calibrationApplied: true,
+        maxSeqLength: 61632,
+        ggufBatchSize: 64,
+        learningRate: 0.000044737651421804806,
+      },
+      path.join(root, "sessions"),
+    );
+    assert.ok(args.includes("--full-content-context"));
+    assert.equal(args[args.indexOf("--max-seq-length") + 1], "61632");
+    assert.equal(args[args.indexOf("--gguf-batch-size") + 1], "64");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("builds a non-interactive combined osAi command with local rollouts", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-command-"));
   const fine = path.join(root, "fine");

@@ -2666,24 +2666,47 @@ select:disabled {
 
 .session-error {
   display: flex;
-  align-items: flex-start;
-  gap: 9px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
   margin-bottom: 16px;
-  padding: 11px 13px;
+  padding: 14px 16px;
   color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 22%, var(--line));
   border-radius: 10px;
   background: var(--danger-bg);
   font-size: 13px;
   line-height: 1.45;
 }
 
-.session-error > span {
+.session-error-content {
+  display: flex;
+  align-items: flex-start;
+  flex: 1 1 270px;
+  gap: 11px;
   min-width: 0;
-  flex: 1;
+  text-align: left;
+}
+
+.session-error-content > .icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.session-error-content p {
+  margin: 3px 0 0;
   overflow-wrap: anywhere;
 }
 
-.session-error > button {
+.session-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.session-error-actions button {
   min-height: 34px;
   flex: 0 0 auto;
   display: inline-flex;
@@ -2698,8 +2721,8 @@ select:disabled {
   font-weight: 600;
 }
 
-.session-error > button:hover,
-.session-error > button:focus-visible {
+.session-error-actions button:hover,
+.session-error-actions button:focus-visible {
   outline: 0;
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
@@ -3047,6 +3070,69 @@ select:disabled {
   box-shadow: -16px 0 50px var(--shadow);
 }
 
+.session-log-sheet {
+  width: min(820px, 100vw);
+  overflow: hidden;
+  text-align: left;
+}
+
+.session-log-sheet-summary {
+  padding: 13px 15px;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--line));
+  border-radius: 10px;
+  background: var(--danger-bg);
+}
+
+.session-log-sheet-summary p {
+  margin: 7px 0 0;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.session-log-sheet-location {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-log-sheet-location span,
+.session-log-sheet-label span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-log-sheet-location code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.session-log-sheet-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.session-log-sheet-output {
+  min-height: 0;
+  flex: 1;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  font:
+    12px/1.5 "Fira Code",
+    ui-monospace,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .hardware-sheet > header,
 .hardware-card-title {
   display: flex;
@@ -3174,7 +3260,8 @@ select:disabled {
   line-height: 1.5;
 }
 
-.app-dialog .dialog-close {
+.app-dialog .dialog-close,
+.hardware-sheet .dialog-close {
   width: 40px;
   height: 40px;
   flex: 0 0 auto;
@@ -3187,7 +3274,8 @@ select:disabled {
   background: transparent;
 }
 
-.app-dialog .dialog-close:hover:not(:disabled) {
+.app-dialog .dialog-close:hover:not(:disabled),
+.hardware-sheet .dialog-close:hover:not(:disabled) {
   color: var(--text);
   background: var(--control-selected);
 }

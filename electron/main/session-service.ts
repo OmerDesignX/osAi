@@ -510,7 +510,7 @@ export async function buildOsAiArgs(
       "--batch-size",
       optionalInteger(input.batchSize, "Batch size", 1, 65_536),
     );
-    if (!input.fullContentContext)
+    if (!input.fullContentContext || input.calibrationApplied)
       pushOptional(
         args,
         "--max-seq-length",
