@@ -48,6 +48,7 @@ export type TrainingRequest = {
   autoSettings: boolean;
   calibrationApplied?: boolean;
   fullContentContext: boolean;
+  autoStart: boolean;
   autoStop: boolean;
   multiGpu: "auto" | "on" | "off";
   liveRollouts: boolean;

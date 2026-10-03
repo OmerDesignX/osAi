@@ -252,6 +252,7 @@ const defaults: TrainingRequest = {
   optimizer: "auto",
   autoSettings: true,
   fullContentContext: true,
+  autoStart: false,
   autoStop: true,
   multiGpu: "auto",
   liveRollouts: true,
@@ -402,6 +403,8 @@ function resetAdvancedValues(
 export function App() {
   const [preferences, setPreferences] = useState(fallbackPreferences);
   const [form, setForm] = useState(defaults);
+  const [workflowStep, setWorkflowStep] = useState(0);
+  const [unlockedStep, setUnlockedStep] = useState(0);
   const [sameDataset, setSameDataset] = useState(true);
   const [advanced, setAdvanced] = useState(false);
   const [guidanceOpen, setGuidanceOpen] = useState(false);
@@ -476,6 +479,7 @@ export function App() {
   const [dataEditorActive, setDataEditorActive] = useState(false);
   const [dataEditorSource, setDataEditorSource] = useState("");
   const appRootRef = useRef<HTMLDivElement | null>(null);
+  const trainingFormRef = useRef<HTMLFieldSetElement | null>(null);
   const quickSettingsRef = useRef<HTMLElement | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
   const followLogRef = useRef(true);
@@ -928,6 +932,8 @@ export function App() {
   useEffect(() => {
     if (!selected) {
       setLearningPace(null);
+      setWorkflowStep(0);
+      setUnlockedStep(0);
       setForm({
         ...defaults,
         sessionsRoot: preferences.sessionsRoot,
@@ -938,6 +944,8 @@ export function App() {
     }
     if (!selected.request) return;
     setLearningPace(null);
+    setWorkflowStep(4);
+    setUnlockedStep(4);
     const restored = Object.fromEntries(
       Object.entries(selected.request).filter(
         ([, value]) => value !== undefined,
@@ -1109,6 +1117,8 @@ export function App() {
       setCalibrationMessage(
         `Ready · pilot loss ${result.first_loss.toFixed(3)} → ${result.last_loss.toFixed(3)} · rate ${result.learning_rate.toExponential(2)}`,
       );
+      if (form.autoStart && form.autoSettings && form.stage !== "alignment")
+        await startTraining(result);
     } catch (error) {
       setCalibrationMessage("Calibration needs attention");
       setNotice(readableError(error));
@@ -1117,11 +1127,20 @@ export function App() {
     }
   };
 
-  const startTraining = async () => {
+  const startTraining = async (
+    calibrated?: AutoCalibrationResult,
+    autoStartOverride?: boolean,
+  ) => {
+    if (!form.sessionName.trim()) {
+      setWorkflowStep(0);
+      setNotice("Name this session before starting training");
+      return;
+    }
     if (
       form.autoSettings &&
       form.stage !== "alignment" &&
-      !currentCalibration
+      !currentCalibration &&
+      !calibrated
     ) {
       setNotice("Calibrate the selected model and dataset before training");
       return;
@@ -1165,6 +1184,8 @@ export function App() {
       }
       const request = {
         ...form,
+        autoStart: autoStartOverride ?? form.autoStart,
+        learningRate: calibrated?.learning_rate ?? form.learningRate,
         autoStop: form.stage !== "alignment" && form.autoStop,
         sessionsRoot: form.sessionsRoot || preferences.sessionsRoot,
         reuseDataset: form.stage === "fine-tune-align" && sameDataset,
@@ -1424,6 +1445,32 @@ export function App() {
   const stage = form.stage;
   const needsFineTune = stage !== "alignment";
   const needsAlignment = stage !== "fine-tuning";
+  const workflowLabels = [
+    "Session",
+    "Model & engine",
+    "Pipeline",
+    "Data & context",
+    "Calibration & settings",
+  ];
+  const canContinueWorkflow =
+    workflowStep === 0
+      ? Boolean(form.sessionName.trim())
+      : workflowStep === 1
+        ? form.modelSource === "official" ||
+          Boolean(form.customModelFolder.trim())
+        : workflowStep === 3
+          ? Boolean(
+              (!needsFineTune || form.fineTuneData.trim()) &&
+              (!needsAlignment ||
+                (stage === "fine-tune-align" && sameDataset) ||
+                form.alignmentData.trim()) &&
+              (stage !== "alignment" || form.adapter.trim()),
+            )
+          : true;
+  const goToWorkflowStep = (step: number) => {
+    setWorkflowStep(step);
+    trainingFormRef.current?.scrollTo({ top: 0 });
+  };
   const backendReady = backend?.available === true;
   const backendInstallBusy = [
     "preparing-python",
@@ -1656,13 +1703,52 @@ export function App() {
               </div>
             </header>
 
+            <nav
+              className="workflow-navigation"
+              aria-label="Training setup steps"
+            >
+              {workflowLabels.map((label, index) => (
+                <button
+                  key={label}
+                  type="button"
+                  className={workflowStep === index ? "active" : ""}
+                  aria-current={workflowStep === index ? "step" : undefined}
+                  aria-label={
+                    index === 0 ? "Session" : `Step ${index} of 4: ${label}`
+                  }
+                  disabled={index > unlockedStep || starting || calibrationBusy}
+                  onClick={() => goToWorkflowStep(index)}
+                >
+                  <span>{index === 0 ? "•" : index}</span>
+                  {index === 1
+                    ? "Model"
+                    : index === 3
+                      ? "Data"
+                      : index === 4
+                        ? "Settings"
+                        : label}
+                </button>
+              ))}
+            </nav>
+
             <fieldset
+              ref={trainingFormRef}
               className="training-form"
               disabled={Boolean(active) || starting || calibrationBusy}
             >
-              <section className="form-section session-controls">
+              <section
+                className="form-section session-controls"
+                hidden={workflowStep !== 0}
+              >
                 <div className="section-heading">
-                  <h2>Session</h2>
+                  <div className="section-heading-title">
+                    <h2>Session</h2>
+                    <SettingInfo label="session setup">
+                      Name this run so you can find its progress, logs, and
+                      checkpoints later. Choose a save folder with space for
+                      adapters and reusable models.
+                    </SettingInfo>
+                  </div>
                   <p>Name this run and choose where its files are saved.</p>
                 </div>
                 <label className="field session-name-control">
@@ -1691,11 +1777,19 @@ export function App() {
                 />
               </section>
 
-              <section className="form-section">
+              <section className="form-section" hidden={workflowStep !== 1}>
                 <div className="section-heading">
-                  <h2>
-                    <span className="workflow-step">1</span> Model
-                  </h2>
+                  <div className="section-heading-title">
+                    <h2>
+                      <span className="workflow-step">1</span> Model &amp;
+                      engine
+                    </h2>
+                    <SettingInfo label="model and engine">
+                      Choose an osCode model or a compatible custom model. Auto
+                      selects an available training engine and accelerator;
+                      Multi-GPU can spread GGUF work across detected devices.
+                    </SettingInfo>
+                  </div>
                   <p>Use an osCode model or choose your own model folder.</p>
                 </div>
 
@@ -1857,11 +1951,18 @@ export function App() {
                 </div>
               </section>
 
-              <section className="form-section">
+              <section className="form-section" hidden={workflowStep !== 2}>
                 <div className="section-heading">
-                  <h2>
-                    <span className="workflow-step">2</span> Pipeline
-                  </h2>
+                  <div className="section-heading-title">
+                    <h2>
+                      <span className="workflow-step">2</span> Pipeline
+                    </h2>
+                    <SettingInfo label="training pipeline">
+                      Fine-tune learns from supervised examples. Align uses
+                      preference data and an existing adapter. Fine-tune + align
+                      runs both stages in order.
+                    </SettingInfo>
+                  </div>
                   <p>Choose the work osAi should run.</p>
                 </div>
                 <div className="segmented three">
@@ -1884,11 +1985,19 @@ export function App() {
                 </div>
               </section>
 
-              <section className="form-section">
+              <section className="form-section" hidden={workflowStep !== 3}>
                 <div className="section-heading">
-                  <h2>
-                    <span className="workflow-step">3</span> Data &amp; context
-                  </h2>
+                  <div className="section-heading-title">
+                    <h2>
+                      <span className="workflow-step">3</span> Data &amp;
+                      context
+                    </h2>
+                    <SettingInfo label="training data and context">
+                      Select a file or folder of training data. Full scans for
+                      the longest record and fits it within the model limit;
+                      Windowing uses overlapping segments for long records.
+                    </SettingInfo>
+                  </div>
                   <p>
                     Text, image, video and compatible audio data stay on this
                     computer.
@@ -2014,7 +2123,7 @@ export function App() {
               </section>
 
               {needsAlignment && (
-                <section className="form-section">
+                <section className="form-section" hidden={workflowStep !== 3}>
                   <div className="section-heading">
                     <h2>Alignment</h2>
                     <p>Select the objective or leave it on automatic.</p>
@@ -2067,12 +2176,23 @@ export function App() {
                 </section>
               )}
 
-              <section className="form-section run-controls">
+              <section
+                className="form-section run-controls"
+                hidden={workflowStep !== 4}
+              >
                 <div className="section-heading">
-                  <h2>
-                    <span className="workflow-step">4</span> Calibration &amp;
-                    settings
-                  </h2>
+                  <div className="section-heading-title">
+                    <h2>
+                      <span className="workflow-step">4</span> Calibration &amp;
+                      settings
+                    </h2>
+                    <SettingInfo label="calibration and settings">
+                      Hardware fitting tests a small local sample to measure
+                      safe memory settings and a learning rate that lowers pilot
+                      loss. Review Quick Settings after calibration, or turn
+                      fitting off for manual control.
+                    </SettingInfo>
+                  </div>
                   <p>
                     Measure a short local training sample, then review the
                     fitted controls.
@@ -2385,7 +2505,7 @@ export function App() {
                 )}
 
               {advanced && (
-                <div className="advanced-panel">
+                <div className="advanced-panel" hidden={workflowStep !== 4}>
                   <div className="advanced-toolbar">
                     <div className="advanced-auto-note">
                       <Icon name="cpu" />
@@ -2960,49 +3080,98 @@ export function App() {
               )}
             </fieldset>
 
-            <div className="auto-stop-panel">
-              <div className="setting-heading">
-                <strong>Auto stop</strong>
-                <SettingInfo label="Auto stop">
-                  Watches average fine-tuning loss after five minutes of recent
-                  readings. It stops only when four consecutive loss windows
-                  rise on every reporting device, regardless of total dataset
-                  progress. It saves and verifies a checkpoint before stopping.
-                  Training loss can be noisy, so turn this off if you prefer to
-                  decide from the graph.
-                </SettingInfo>
+            <div className="automation-panel" hidden={workflowStep !== 4}>
+              <div className="auto-start-panel">
+                <div className="setting-heading">
+                  <strong>Auto Start</strong>
+                  <SettingInfo label="Auto Start">
+                    Start training as soon as calibration succeeds. A cancelled
+                    or failed calibration never starts training. Turn this on
+                    after calibration to begin immediately.
+                  </SettingInfo>
+                </div>
+                <label className="toggle-row compact">
+                  <input
+                    type="checkbox"
+                    checked={
+                      form.autoStart && form.autoSettings && needsFineTune
+                    }
+                    disabled={
+                      Boolean(active) ||
+                      starting ||
+                      calibrationBusy ||
+                      !form.autoSettings ||
+                      !needsFineTune
+                    }
+                    onChange={(event) => {
+                      const enabled = event.target.checked;
+                      setForm((current) => ({
+                        ...current,
+                        autoStart: enabled,
+                      }));
+                      if (enabled && currentCalibration)
+                        void startTraining(undefined, true);
+                    }}
+                  />
+                  <span>
+                    <b>
+                      {form.autoStart && form.autoSettings && needsFineTune
+                        ? "On"
+                        : "Off"}
+                    </b>
+                    <small>
+                      {form.autoSettings && needsFineTune
+                        ? "Train immediately after a successful calibration"
+                        : "Available with hardware fitting and fine-tuning"}
+                    </small>
+                  </span>
+                </label>
               </div>
-              <label className="toggle-row compact">
-                <input
-                  type="checkbox"
-                  checked={
-                    autoStopAvailable &&
-                    (active ? Boolean(active.autoStopEnabled) : form.autoStop)
-                  }
-                  disabled={
-                    !autoStopAvailable ||
-                    autoStopBusy ||
-                    active?.status === "stopping"
-                  }
-                  onChange={(event) =>
-                    void changeAutoStop(event.target.checked)
-                  }
-                />
-                <span>
-                  <b>
-                    {autoStopAvailable &&
-                    (active?.autoStopEnabled || (!active && form.autoStop))
-                      ? "On"
-                      : "Off"}
-                  </b>
-                  <small>
-                    {!autoStopAvailable
-                      ? "Available for fine-tuning runs"
-                      : active?.autoStopMessage ||
-                        "Watch for sustained rising loss"}
-                  </small>
-                </span>
-              </label>
+
+              <div className="auto-stop-panel">
+                <div className="setting-heading">
+                  <strong>Auto stop</strong>
+                  <SettingInfo label="Auto stop">
+                    Watches average fine-tuning loss after five minutes of
+                    recent readings. It stops only when four consecutive loss
+                    windows rise on every reporting device, regardless of total
+                    dataset progress. It saves and verifies a checkpoint before
+                    stopping. Training loss can be noisy, so turn this off if
+                    you prefer to decide from the graph.
+                  </SettingInfo>
+                </div>
+                <label className="toggle-row compact">
+                  <input
+                    type="checkbox"
+                    checked={
+                      autoStopAvailable &&
+                      (active ? Boolean(active.autoStopEnabled) : form.autoStop)
+                    }
+                    disabled={
+                      !autoStopAvailable ||
+                      autoStopBusy ||
+                      active?.status === "stopping"
+                    }
+                    onChange={(event) =>
+                      void changeAutoStop(event.target.checked)
+                    }
+                  />
+                  <span>
+                    <b>
+                      {autoStopAvailable &&
+                      (active?.autoStopEnabled || (!active && form.autoStop))
+                        ? "On"
+                        : "Off"}
+                    </b>
+                    <small>
+                      {!autoStopAvailable
+                        ? "Available for fine-tuning runs"
+                        : active?.autoStopMessage ||
+                          "Watch for sustained rising loss"}
+                    </small>
+                  </span>
+                </label>
+              </div>
             </div>
 
             <footer className="panel-footer">
@@ -3082,6 +3251,31 @@ export function App() {
                       ? "Stopping…"
                       : "Stop training"}
                   </button>
+                </div>
+              ) : workflowStep < 4 ? (
+                <div className="workflow-continue">
+                  <button
+                    type="button"
+                    className="primary-button start-button"
+                    disabled={!canContinueWorkflow || starting}
+                    onClick={() => {
+                      const next = workflowStep + 1;
+                      setUnlockedStep((current) => Math.max(current, next));
+                      goToWorkflowStep(next);
+                    }}
+                  >
+                    Continue to {workflowLabels[workflowStep + 1]}
+                    <Icon name="arrow-right" />
+                  </button>
+                  {!canContinueWorkflow && (
+                    <small>
+                      {workflowStep === 0
+                        ? "Name the session to continue."
+                        : workflowStep === 1
+                          ? "Choose a custom model folder to continue."
+                          : "Choose the required training data to continue."}
+                    </small>
+                  )}
                 </div>
               ) : (
                 <button
