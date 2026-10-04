@@ -32,7 +32,7 @@ const activeStatuses = new Set([
   "paused",
   "stopping",
 ]);
-const BACKEND_STATUS_TIMEOUT_MS = 5_000;
+const BACKEND_STATUS_TIMEOUT_MS = 20_000;
 const BACKEND_STATUS_OUTPUT_LIMIT = 8 * 1024;
 const alignmentTypes = new Set([
   "auto",
@@ -1115,7 +1115,7 @@ export class SessionService {
           available: false,
           executable,
           version: "",
-          message: "osAi CLI did not respond within 5 seconds",
+          message: "osAi CLI did not respond within 20 seconds",
         });
         try {
           child.kill("SIGKILL");

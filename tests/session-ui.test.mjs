@@ -52,9 +52,13 @@ test("backend detection is bounded and first-run setup starts once", async () =>
     fs.readFile("electron/main/session-service.ts", "utf8"),
     fs.readFile("electron/main/index.ts", "utf8"),
   ]);
-  assert.match(service, /BACKEND_STATUS_TIMEOUT_MS\s*=\s*5_000/);
+  assert.match(service, /BACKEND_STATUS_TIMEOUT_MS\s*=\s*20_000/);
   assert.match(service, /The selected executable is not the osAi CLI/);
   assert.match(app, /backendCheckRef/);
+  assert.match(
+    app,
+    /backendCheckRef\.current\.then\(\(\) => refreshBackend\(\)\)/,
+  );
   assert.match(app, /autoInstallStartedRef/);
   assert.match(app, /Not connected/);
   assert.doesNotMatch(app, /setInterval\(\(\) => void refreshBackend/);

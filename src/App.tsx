@@ -715,28 +715,35 @@ export function App() {
     );
   }, []);
 
-  const refreshBackend = useCallback(() => {
-    if (backendCheckRef.current) return backendCheckRef.current;
-    setBackendChecking(true);
-    const request = window.osai
-      .backendStatus()
-      .catch((error): BackendStatus => ({
-        available: false,
-        executable: "osai",
-        version: "",
-        message: readableError(error) || "The osAi CLI could not be checked",
-      }))
-      .then((status) => {
-        setBackend(status);
-        return status;
-      })
-      .finally(() => {
-        backendCheckRef.current = null;
-        setBackendChecking(false);
-      });
-    backendCheckRef.current = request;
-    return request;
-  }, []);
+  const refreshBackend = useCallback(
+    (afterPending = false): Promise<BackendStatus> => {
+      if (backendCheckRef.current) {
+        return afterPending
+          ? backendCheckRef.current.then(() => refreshBackend())
+          : backendCheckRef.current;
+      }
+      setBackendChecking(true);
+      const request = window.osai
+        .backendStatus()
+        .catch((error): BackendStatus => ({
+          available: false,
+          executable: "osai",
+          version: "",
+          message: readableError(error) || "The osAi CLI could not be checked",
+        }))
+        .then((status) => {
+          setBackend(status);
+          return status;
+        })
+        .finally(() => {
+          backendCheckRef.current = null;
+          setBackendChecking(false);
+        });
+      backendCheckRef.current = request;
+      return request;
+    },
+    [],
+  );
 
   useEffect(() => {
     void Promise.all([
@@ -760,7 +767,7 @@ export function App() {
         if (status.state === "error") setNotice(status.message);
         if (status.state === "ready") {
           void window.osai.loadPreferences().then(setPreferences);
-          void refreshBackend();
+          void refreshBackend(true);
         }
       },
     );
@@ -1413,7 +1420,7 @@ export function App() {
       if (installed.state === "error") throw new Error(installed.message);
       const nextPreferences = await window.osai.loadPreferences();
       setPreferences(nextPreferences);
-      await refreshBackend();
+      await refreshBackend(true);
     } catch (error) {
       setNotice(readableError(error));
     }
