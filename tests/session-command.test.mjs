@@ -318,6 +318,23 @@ test("recovers visible MLX progress from an active session log", async () => {
     assert.equal(session.phase, "fine-tuning");
     assert.equal(session.indeterminate, false);
     assert.equal(session.message, "Fine-tuning update 3219 of 15011");
+    await fs.writeFile(
+      logPath,
+      "osai: training plan examples=10000 epochs=1 batch=1 steps=10000 optimizer_updates=10000\ntrain: data=7/10000 loss=1.2\n",
+    );
+    const saved = JSON.parse(
+      await fs.readFile(path.join(directory, "state.json"), "utf8"),
+    );
+    saved.phase = "fine-tuning";
+    saved.progress = 5;
+    saved.indeterminate = false;
+    await fs.writeFile(
+      path.join(directory, "state.json"),
+      JSON.stringify(saved),
+    );
+    const [tinyProgress] = await service.list();
+    assert.equal(tinyProgress.progress, 5);
+    assert.equal(tinyProgress.trainingPercent, 0.07);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

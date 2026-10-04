@@ -18,5 +18,10 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "electron/calibration-key.ts", "electron/types.ts"]
+  "include": [
+    "src",
+    "electron/calibration-key.ts",
+    "electron/session-progress.ts",
+    "electron/types.ts"
+  ]
 }

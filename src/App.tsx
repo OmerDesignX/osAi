@@ -9,6 +9,7 @@ import {
 import { createPortal } from "react-dom";
 import feather from "feather-icons";
 import { calibrationKey } from "../electron/calibration-key.js";
+import { displayedSessionProgress } from "../electron/session-progress.js";
 import type {
   AlignmentType,
   AutoCalibrationResult,
@@ -1502,6 +1503,7 @@ export function App() {
   const activeInProgress =
     active &&
     ["queued", "running", "pausing", "stopping"].includes(active.status);
+  const activeProgress = active ? displayedSessionProgress(active) : null;
   const footerActivity: FooterActivity = (() => {
     if (calibrationBusy)
       return {
@@ -1522,10 +1524,8 @@ export function App() {
     if (activeInProgress)
       return {
         message: `${active.name} · ${active.message}`,
-        percent: active.indeterminate ? null : active.progress,
-        label: active.indeterminate
-          ? "Working"
-          : `${active.progress.toFixed(1)}%`,
+        percent: activeProgress!.percent,
+        label: activeProgress!.label,
         icon: "activity",
         kind: "active",
       };
@@ -1584,8 +1584,8 @@ export function App() {
     if (active)
       return {
         message: `${active.name} · ${active.message}`,
-        percent: active.progress,
-        label: `${active.progress.toFixed(1)}%`,
+        percent: activeProgress!.percent,
+        label: activeProgress!.label,
         icon: "activity",
         kind: "active",
       };

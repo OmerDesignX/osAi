@@ -5,6 +5,37 @@ import {
   phaseProgress,
   recoverFineTuneProgress,
 } from "../dist-electron/main/training-progress.js";
+import { displayedSessionProgress } from "../dist-electron/session-progress.js";
+
+test("shows the trainer's exact percentage instead of the pipeline's five-percent offset", () => {
+  assert.deepEqual(
+    displayedSessionProgress({
+      phase: "fine-tuning",
+      progress: 5,
+      trainingPercent: 0.07,
+      indeterminate: false,
+    }),
+    { percent: 0.07, label: "0.07%" },
+  );
+  assert.deepEqual(
+    displayedSessionProgress({
+      phase: "alignment",
+      progress: 72,
+      trainingPercent: 0.07,
+      indeterminate: false,
+    }),
+    { percent: 0.07, label: "0.07%" },
+  );
+  assert.deepEqual(
+    displayedSessionProgress({
+      phase: "preparing",
+      progress: 5,
+      trainingPercent: undefined,
+      indeterminate: true,
+    }),
+    { percent: null, label: "Working" },
+  );
+});
 
 test("parses MLX table rows using the CLI training plan", () => {
   const parser = new FineTuneProgressParser(1);

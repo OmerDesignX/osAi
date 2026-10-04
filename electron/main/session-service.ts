@@ -116,15 +116,20 @@ async function recoverVisibleProgress(state: SessionState) {
       phaseProgress(recovered.completed, recovered.total, "fine-tuning", stage),
     ),
   );
-  if (progress <= state.progress) return state;
+  const trainingPercent = Math.min(
+    100,
+    (100 * recovered.completed) / recovered.total,
+  );
+  if (
+    progress <= state.progress &&
+    trainingPercent <= (state.trainingPercent ?? -1)
+  )
+    return state;
   return {
     ...state,
     phase: "fine-tuning" as const,
-    progress,
-    trainingPercent: Math.min(
-      100,
-      (100 * recovered.completed) / recovered.total,
-    ),
+    progress: Math.max(state.progress, progress),
+    trainingPercent,
     indeterminate: false,
     message:
       state.status === "paused"
