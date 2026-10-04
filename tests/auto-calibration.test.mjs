@@ -103,11 +103,17 @@ test("a small verified pilot decline is ready for training", () => {
     improvement_percent: 0.0447,
   };
   assert.equal(validateAutoCalibrationResult(pilot), pilot);
+  assert.equal(
+    validateAutoCalibrationResult({ ...pilot, required_context: 1000 })
+      .required_context,
+    1000,
+  );
   for (const invalid of [
     { ...pilot, last_loss: pilot.first_loss },
     { ...pilot, improvement_percent: 0 },
     { ...pilot, learning_rate: 0 },
     { ...pilot, settings: { max_seq_length: 0 } },
+    { ...pilot, required_context: 2048 },
   ])
     assert.throws(
       () => validateAutoCalibrationResult(invalid),

@@ -427,6 +427,7 @@ export async function buildOsAiArgs(
   input: TrainingRequest,
   sessionsRoot: string,
   modelsRoot = defaultModelsRoot,
+  calibratedContext?: number,
 ) {
   if (!["auto", "mlx", "llama.cpp"].includes(input.engine))
     throw new Error("Invalid training engine");
@@ -504,6 +505,22 @@ export async function buildOsAiArgs(
         ? "--full-content-context"
         : "--no-full-content-context",
     );
+  if (calibratedContext !== undefined) {
+    if (
+      !needsFineTune ||
+      !input.fullContentContext ||
+      !input.autoSettings ||
+      !input.calibrationApplied ||
+      !Number.isInteger(calibratedContext) ||
+      calibratedContext < 32 ||
+      !input.maxSeqLength ||
+      calibratedContext > input.maxSeqLength
+    )
+      throw new Error(
+        "The verified calibration context does not match these training settings",
+      );
+    args.push("--calibrated-context", String(calibratedContext));
+  }
   if (!input.autoSettings || input.calibrationApplied) {
     pushOptional(
       args,
@@ -1140,7 +1157,7 @@ export class SessionService {
     });
   }
 
-  async start(input: TrainingRequest) {
+  async start(input: TrainingRequest, calibratedContext?: number) {
     const preferences = await this.preferences();
     const executable = preferences.backendExecutable || "osai";
     const sessionsRoot = await ensureSessionsRoot(
@@ -1178,7 +1195,12 @@ export class SessionService {
                 "Alignment dataset",
                 false,
               );
-      command = await buildOsAiArgs(prepared, directory);
+      command = await buildOsAiArgs(
+        prepared,
+        directory,
+        defaultModelsRoot,
+        calibratedContext,
+      );
     } catch (error) {
       await fs.rm(directory, { recursive: true, force: true });
       throw error;

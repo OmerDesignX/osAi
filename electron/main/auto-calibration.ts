@@ -76,6 +76,10 @@ export function validateAutoCalibrationResult(
     !result.settings ||
     !Number.isInteger(result.settings.max_seq_length) ||
     result.settings.max_seq_length <= 0 ||
+    (result.required_context != null &&
+      (!Number.isInteger(result.required_context) ||
+        result.required_context < 32 ||
+        result.required_context > result.settings.max_seq_length)) ||
     !Number.isFinite(result.learning_rate) ||
     result.learning_rate <= 0 ||
     !Number.isFinite(result.first_loss) ||

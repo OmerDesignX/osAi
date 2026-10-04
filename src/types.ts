@@ -117,6 +117,7 @@ export type AutoCalibrationResult = Omit<
   AutoBenchmarkResult,
   "elapsed_seconds" | "cached"
 > & {
+  required_context?: number | null;
   learning_rate: number;
   optimizer: "sgd" | "adamw";
   sample_rows: number;

@@ -334,6 +334,10 @@ function registerIpc() {
         input,
         (message) => send("training:calibration-progress", message),
       );
+      if (input.fullContentContext && !result.required_context)
+        throw new Error(
+          "The CLI did not return its verified full context; update osAi CLI and calibrate again",
+        );
       const [after, devicesAfter] = await Promise.all([
         datasetTrainingSummary(input.fineTuneData),
         readAutoDevices(status.executable, input.accelerator),
@@ -412,7 +416,14 @@ function registerIpc() {
             devices: approvedCalibration.result.devices.join(", "),
           }
         : input;
-    return sessionService.start(request);
+    return sessionService.start(
+      request,
+      input.fullContentContext &&
+        input.autoSettings &&
+        input.stage !== "alignment"
+        ? (approvedCalibration?.result.required_context ?? undefined)
+        : undefined,
+    );
   });
   ipcMain.handle("training:pause", (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");

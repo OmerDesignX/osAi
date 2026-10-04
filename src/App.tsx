@@ -1167,6 +1167,13 @@ export function App() {
         (value, index, values) => value && values.indexOf(value) === index,
       );
       for (const source of dataSources) {
+        if (
+          source === form.fineTuneData &&
+          form.autoSettings &&
+          form.fullContentContext &&
+          (calibrated || currentCalibration)
+        )
+          continue;
         if (source.toLowerCase().endsWith(".parquet")) continue;
         let inspection;
         try {

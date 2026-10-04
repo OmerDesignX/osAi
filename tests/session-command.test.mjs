@@ -671,10 +671,29 @@ test("full-content training keeps the calibrated context and microbatch", async 
         learningRate: 0.000044737651421804806,
       },
       path.join(root, "sessions"),
+      path.join(root, "models"),
+      61588,
     );
     assert.ok(args.includes("--full-content-context"));
+    assert.equal(args[args.indexOf("--calibrated-context") + 1], "61588");
     assert.equal(args[args.indexOf("--max-seq-length") + 1], "61632");
     assert.equal(args[args.indexOf("--gguf-batch-size") + 1], "64");
+    await assert.rejects(
+      buildOsAiArgs(
+        {
+          ...base,
+          stage: "fine-tuning",
+          fineTuneData: data,
+          fullContentContext: true,
+          calibrationApplied: true,
+          maxSeqLength: 1024,
+        },
+        path.join(root, "sessions"),
+        path.join(root, "models"),
+        61588,
+      ),
+      /does not match these training settings/,
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
