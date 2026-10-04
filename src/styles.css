@@ -1280,6 +1280,10 @@ select:disabled {
   grid-column: 1 / -1;
 }
 
+.active-run-controls > button:nth-child(3):last-child {
+  grid-column: 1 / -1;
+}
+
 .session-workspace {
   min-width: 0;
   min-height: 0;

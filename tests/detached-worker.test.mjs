@@ -331,6 +331,84 @@ test("Auto stop saves a checkpoint before ending a rising-loss trainer", async (
   }
 });
 
+test("Auto stop ends a trainer when a new checkpoint stalls and an older one is safe", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "osai-worker-auto-stop-stalled-"),
+  );
+  const worker = path.resolve("dist-electron/main/training-worker.js");
+  const clock = path.resolve("tests/fixtures/fast-clock.cjs");
+  const backend = path.resolve("tests/fixtures/fake-backend.mjs");
+  const statePath = path.join(root, "state.json");
+  const jobPath = path.join(root, "job.json");
+  const id = "70707070-7070-4070-8070-707070707070";
+  const now = new Date().toISOString();
+  const state = {
+    schemaVersion: 1,
+    id,
+    name: "auto-stop-stalled",
+    status: "queued",
+    phase: "preparing",
+    progress: 0,
+    indeterminate: true,
+    autoStopEnabled: true,
+    message: "queued",
+    createdAt: now,
+    sessionDirectory: root,
+    logPath: path.join(root, "training.log"),
+    command: "node fake-backend.mjs --auto-stop-stalled",
+  };
+  const job = {
+    schemaVersion: 1,
+    id,
+    executable: process.execPath,
+    args: [backend, "--auto-stop-stalled"],
+    sessionDirectory: root,
+    statePath,
+    logPath: state.logPath,
+    stopPath: path.join(root, "stop.request"),
+    checkpointRequestPath: path.join(root, "checkpoint.request"),
+    autoStopPath: path.join(root, "auto-stop.setting"),
+    stage: "fine-tuning",
+    iterations: 1,
+    alignmentIterations: 1,
+    createdAt: now,
+  };
+  await fs.writeFile(statePath, JSON.stringify(state));
+  await fs.writeFile(jobPath, JSON.stringify(job));
+  const handle = spawn(
+    process.execPath,
+    ["--require", clock, worker, jobPath],
+    { stdio: "ignore" },
+  );
+  try {
+    const pending = await waitFor(
+      statePath,
+      (value) =>
+        value.checkpointStatus === "requested" &&
+        value.autoStopMessage?.includes("Loss rise detected"),
+    );
+    assert.equal(pending.status, "running");
+    assert.match(pending.message, /Auto stop is saving a checkpoint/);
+    const stopped = await waitFor(
+      statePath,
+      (value) => value.status === "stopped",
+      20_000,
+    );
+    assert.equal(stopped.checkpointStatus, "saved");
+    assert.match(stopped.message, /previous saved checkpoint/);
+    assert.equal((await fs.stat(stopped.checkpointPath)).size > 0, true);
+  } finally {
+    await fs.writeFile(job.stopPath, "stop\n").catch(() => undefined);
+    handle.kill("SIGKILL");
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  }
+});
+
 test("MLX table iterations advance against the announced optimizer steps", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-mlx-"));
   const worker = path.resolve("dist-electron/main/training-worker.js");
@@ -589,7 +667,7 @@ test("a checkpoint-paused worker can be stopped cleanly", async () => {
     schemaVersion: 1,
     id,
     executable: process.execPath,
-    args: [backend, "--pause-checkpoint"],
+    args: [backend, "--pause-checkpoint-long"],
     sessionDirectory: root,
     statePath,
     logPath: state.logPath,

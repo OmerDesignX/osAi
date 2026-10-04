@@ -3142,9 +3142,11 @@ export function App() {
                     Watches average fine-tuning loss after five minutes of
                     recent readings. It stops only when four consecutive loss
                     windows rise on every reporting device, regardless of total
-                    dataset progress. It saves and verifies a checkpoint before
-                    stopping. Training loss can be noisy, so turn this off if
-                    you prefer to decide from the graph.
+                    dataset progress. It requests a new checkpoint before
+                    stopping. If that save stalls, it uses the previous verified
+                    checkpoint. Without a verified checkpoint, training keeps
+                    running and shows a warning. Training loss can be noisy, so
+                    turn this off if you prefer to decide from the graph.
                   </SettingInfo>
                 </div>
                 <label className="toggle-row compact">
@@ -3185,7 +3187,8 @@ export function App() {
               {active ? (
                 <div className="active-run-controls">
                   {(active.status === "running" ||
-                    active.status === "pausing") && (
+                    active.status === "pausing" ||
+                    active.status === "stopping") && (
                     <button
                       className={
                         "primary-button" +
@@ -3195,7 +3198,7 @@ export function App() {
                           : "")
                       }
                       disabled={
-                        Boolean(sessionControl) || active.status === "pausing"
+                        Boolean(sessionControl) || active.status !== "running"
                       }
                       onClick={() => void pauseTraining(active.id)}
                     >
@@ -3207,10 +3210,12 @@ export function App() {
                             : "pause"
                         }
                       />
-                      {sessionControl === "pausing" ||
-                      active.status === "pausing"
-                        ? "Saving, then pausing…"
-                        : "Pause training"}
+                      {active.status === "stopping"
+                        ? "Stopping…"
+                        : sessionControl === "pausing" ||
+                            active.status === "pausing"
+                          ? "Saving, then pausing…"
+                          : "Pause training"}
                     </button>
                   )}
                   {active.status === "paused" && (
@@ -3228,35 +3233,42 @@ export function App() {
                     </button>
                   )}
                   {(active.status === "running" ||
-                    active.status === "paused") && (
+                    active.status === "paused" ||
+                    active.status === "pausing" ||
+                    active.status === "stopping") && (
                     <button
                       type="button"
                       className="quiet-button"
-                      disabled={Boolean(sessionControl)}
+                      disabled={
+                        Boolean(sessionControl) ||
+                        active.status === "pausing" ||
+                        active.status === "stopping" ||
+                        active.checkpointStatus === "requested"
+                      }
                       onClick={() => void saveCheckpoint(active.id)}
                     >
                       <Icon
                         name={sessionControl === "saving" ? "loader" : "save"}
                       />
-                      {sessionControl === "saving"
-                        ? "Requesting…"
+                      {sessionControl === "saving" ||
+                      active.checkpointStatus === "requested"
+                        ? "Saving checkpoint…"
                         : "Save checkpoint"}
                     </button>
                   )}
                   <button
                     className="danger-button"
-                    disabled={
-                      Boolean(sessionControl) || active.status === "stopping"
-                    }
+                    disabled={Boolean(sessionControl)}
                     onClick={() => void stopTraining(active.id)}
                   >
                     <Icon
                       name={sessionControl === "stopping" ? "loader" : "square"}
                     />
-                    {sessionControl === "stopping" ||
-                    active.status === "stopping"
+                    {sessionControl === "stopping"
                       ? "Stopping…"
-                      : "Stop training"}
+                      : active.status === "stopping"
+                        ? "Stop now"
+                        : "Stop training"}
                   </button>
                 </div>
               ) : workflowStep < 4 ? (

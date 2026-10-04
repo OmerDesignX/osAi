@@ -1461,6 +1461,7 @@ export class SessionService {
     const state = await this.find(id);
     if (state.status !== "running" && state.status !== "paused")
       throw new Error("Start or resume training before saving a checkpoint");
+    if (state.checkpointStatus === "requested") return state;
     const job = JSON.parse(
       await fs.readFile(path.join(state.sessionDirectory, "job.json"), "utf8"),
     ) as WorkerJob;

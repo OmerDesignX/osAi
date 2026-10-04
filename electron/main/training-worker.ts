@@ -29,7 +29,9 @@ let stopping = false;
 let paused = false;
 let pauseGeneration = "";
 let autoStopGeneration = "";
+let autoStopRequestedAt = 0;
 let autoStopped = false;
+let autoStoppedAtPriorCheckpoint = false;
 let pausedIndeterminate = false;
 let finalised = false;
 let lastStderrLine = "";
@@ -44,6 +46,7 @@ let mlxMetricTable = false;
 let lastTrainingStep: number | null = null;
 const lastMetric = new Map<string, { at: number; percent: number }>();
 const lossRise = new LossRiseDetector();
+const autoStopCheckpointTimeoutMs = 2 * 60_000;
 
 function disableAutoStop(message: string) {
   state.autoStopEnabled = false;
@@ -362,9 +365,10 @@ function consumeLine(raw: string) {
       const percentComplete = ((100 * completed) / Math.max(1, total)).toFixed(
         2,
       );
-      state.message =
-        `Fine-tuning: ${completed.toLocaleString()} of ${total.toLocaleString()} ` +
-        `(${percentComplete}%)`;
+      if (!autoStopGeneration)
+        state.message =
+          `Fine-tuning: ${completed.toLocaleString()} of ${total.toLocaleString()} ` +
+          `(${percentComplete}%)`;
     } else if (lower.includes("publish") || lower.includes("fusion")) {
       state.phase = "publishing";
       state.indeterminate = true;
@@ -485,6 +489,16 @@ async function requestPause() {
   if (paused || pauseGeneration || stopping || !child?.pid) return;
   if (!job.checkpointRequestPath)
     throw new Error("This session cannot save a checkpoint before pausing");
+  if (autoStopGeneration) {
+    pauseGeneration = autoStopGeneration;
+    autoStopGeneration = "";
+    autoStopRequestedAt = 0;
+    state.status = "pausing";
+    state.autoStopMessage = "Manual pause requested during Auto stop";
+    state.message = "Saving the pending checkpoint before pausing";
+    await scheduleStateWrite(true);
+    return;
+  }
   pauseGeneration = randomUUID();
   const pending = `${job.checkpointRequestPath}.${process.pid}.pending`;
   try {
@@ -505,17 +519,18 @@ async function requestAutomaticStop(reason: string) {
   if (stopping || autoStopGeneration || pauseGeneration || !child?.pid) return;
   if (!job.checkpointRequestPath) return;
   autoStopGeneration = randomUUID();
+  autoStopRequestedAt = Date.now();
   const pending = `${job.checkpointRequestPath}.${process.pid}.pending`;
   try {
     await fs.writeFile(pending, `${autoStopGeneration}\n`, { mode: 0o600 });
     await fs.rename(pending, job.checkpointRequestPath);
-    state.status = "stopping";
     state.checkpointStatus = "requested";
     state.autoStopMessage = `Loss rise detected: ${reason}. Saving the latest checkpoint`;
     state.message = "Auto stop is saving a checkpoint before stopping";
     await scheduleStateWrite(true);
   } catch (error) {
     autoStopGeneration = "";
+    autoStopRequestedAt = 0;
     disableAutoStop(
       "Auto stop could not request a checkpoint; training continues",
     );
@@ -528,22 +543,23 @@ async function requestAutomaticStop(reason: string) {
 
 async function completeAutomaticStop(savedPath: string) {
   if (!autoStopGeneration || stopping || !child?.pid) return;
+  autoStopGeneration = "";
+  autoStopRequestedAt = 0;
   try {
     const snapshot = await fs.stat(savedPath);
     if (!snapshot.isFile() || snapshot.size === 0)
       throw new Error("The Auto stop checkpoint adapter is empty");
   } catch (error) {
-    autoStopGeneration = "";
     disableAutoStop(
       "Auto stop could not verify its checkpoint; training continues",
     );
     state.status = "running";
+    state.checkpointStatus = "failed";
     state.error = error instanceof Error ? error.message : String(error);
     await scheduleStateWrite(true);
     return;
   }
   autoStopped = true;
-  autoStopGeneration = "";
   state.autoStopMessage =
     "Stopped after sustained rising loss; checkpoint saved";
   await terminateTree().catch(async (error) => {
@@ -551,6 +567,49 @@ async function completeAutomaticStop(savedPath: string) {
     child?.kill("SIGKILL");
     await scheduleStateWrite(true);
   });
+}
+
+async function recoverStalledAutomaticStop() {
+  if (
+    !autoStopGeneration ||
+    !autoStopRequestedAt ||
+    stopping ||
+    Date.now() - autoStopRequestedAt < autoStopCheckpointTimeoutMs
+  )
+    return;
+  autoStopGeneration = "";
+  autoStopRequestedAt = 0;
+  const savedPath = state.checkpointPath;
+  if (savedPath) {
+    const resolved = path.resolve(savedPath);
+    const relative = path.relative(job.sessionDirectory, resolved);
+    const snapshot = await fs.stat(resolved).catch(() => null);
+    if (
+      !relative.startsWith("..") &&
+      !path.isAbsolute(relative) &&
+      /[\\/]outputs[\\/]checkpoint[\\/]/i.test(resolved) &&
+      snapshot?.isFile() &&
+      snapshot.size > 0
+    ) {
+      autoStopped = true;
+      autoStoppedAtPriorCheckpoint = true;
+      state.checkpointStatus = "saved";
+      state.autoStopMessage =
+        "The latest checkpoint stalled; stopped with the previous saved checkpoint";
+      await terminateTree().catch(async (error) => {
+        state.error = error instanceof Error ? error.message : String(error);
+        child?.kill("SIGKILL");
+        await scheduleStateWrite(true);
+      });
+      return;
+    }
+  }
+  state.checkpointStatus = "failed";
+  state.message = "Auto stop could not verify a checkpoint; training continues";
+  disableAutoStop(
+    "The checkpoint save stalled and no previous checkpoint was found",
+  );
+  await scheduleStateWrite(true);
 }
 
 async function completePause(savedPath: string) {
@@ -616,9 +675,18 @@ async function checkControlRequests() {
         if (state.autoStopEnabled !== enabled) {
           state.autoStopEnabled = enabled;
           if (state.request) state.request.autoStop = enabled;
+          const canceledPendingStop = !enabled && Boolean(autoStopGeneration);
+          if (canceledPendingStop) {
+            autoStopGeneration = "";
+            autoStopRequestedAt = 0;
+            state.checkpointStatus = state.checkpointPath ? "saved" : "failed";
+            state.message = "Auto stop canceled; training continues";
+          }
           state.autoStopMessage = enabled
             ? "Gathering a loss baseline"
-            : "Auto stop is off";
+            : canceledPendingStop
+              ? "Auto stop canceled; the requested checkpoint may still finish"
+              : "Auto stop is off";
           lossRise.setEnabled(enabled);
           await scheduleStateWrite(true);
         }
@@ -645,6 +713,7 @@ async function checkControlRequests() {
         await scheduleStateWrite(true);
       }
     }
+    await recoverStalledAutomaticStop();
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error);
     state.message = "The requested training control could not be applied";
@@ -660,7 +729,9 @@ async function terminateTree() {
   pauseGeneration = "";
   state.status = "stopping";
   state.message = autoStopped
-    ? "Auto stop saved a checkpoint and is stopping training"
+    ? autoStoppedAtPriorCheckpoint
+      ? "Auto stop is stopping training with the previous saved checkpoint"
+      : "Auto stop saved a checkpoint and is stopping training"
     : "Stopping the osAi process";
   await scheduleStateWrite(true);
   if (!child?.pid) return;
@@ -730,7 +801,9 @@ async function finish(
       ? "Training completed successfully"
       : status === "stopped"
         ? autoStopped
-          ? "Auto stop saved a checkpoint after sustained rising loss"
+          ? autoStoppedAtPriorCheckpoint
+            ? "Auto stop used the previous saved checkpoint after the latest save stalled"
+            : "Auto stop saved a checkpoint after sustained rising loss"
           : "Training stopped by the user"
         : "Training failed; open the log for details";
   if (error) state.error = error.slice(0, 1000);
