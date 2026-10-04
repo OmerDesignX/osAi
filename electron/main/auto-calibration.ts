@@ -74,6 +74,7 @@ export function validateAutoCalibrationResult(
   if (
     !result ||
     !result.settings ||
+    !Array.isArray(result.devices) ||
     !Number.isInteger(result.settings.max_seq_length) ||
     result.settings.max_seq_length <= 0 ||
     (result.required_context != null &&
@@ -86,7 +87,14 @@ export function validateAutoCalibrationResult(
     !Number.isFinite(result.last_loss) ||
     result.last_loss >= result.first_loss ||
     !Number.isFinite(result.improvement_percent) ||
-    result.improvement_percent <= 0
+    result.improvement_percent <= 0 ||
+    (result.device_speeds !== undefined &&
+      (!Array.isArray(result.device_speeds) ||
+        (result.device_speeds.length > 0 &&
+          result.device_speeds.length !== result.devices.length) ||
+        result.device_speeds.some(
+          (speed) => !Number.isFinite(speed) || speed <= 0,
+        )))
   )
     throw new Error("osAi CLI returned invalid calibration measurements");
   return result;

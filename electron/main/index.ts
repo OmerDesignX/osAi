@@ -414,6 +414,7 @@ function registerIpc() {
             ggufThreads: approvedCalibration.result.settings.gguf_threads,
             targetModules: approvedCalibration.result.settings.target_modules,
             devices: approvedCalibration.result.devices.join(", "),
+            deviceSpeeds: approvedCalibration.result.device_speeds ?? [],
           }
         : input;
     return sessionService.start(

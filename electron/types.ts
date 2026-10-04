@@ -95,6 +95,7 @@ export type TrainingRequest = {
   tensorSplit: string;
   mainGpu: number | null;
   devices: string;
+  deviceSpeeds?: number[];
 };
 
 export type AutoBenchmarkResult = {
@@ -128,6 +129,7 @@ export type AutoCalibrationResult = Omit<
   first_loss: number;
   last_loss: number;
   improvement_percent: number;
+  device_speeds?: number[];
 };
 
 export type SessionArtifacts = {

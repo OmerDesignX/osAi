@@ -97,6 +97,8 @@ test("calibration pilots advanced runtime settings used by training", () => {
 test("a small verified pilot decline is ready for training", () => {
   const pilot = {
     settings: { max_seq_length: 1024 },
+    devices: ["CUDA0", "CUDA1"],
+    device_speeds: [2.1, 1],
     learning_rate: 1e-5,
     first_loss: 3.703472,
     last_loss: 3.701817,
@@ -114,6 +116,8 @@ test("a small verified pilot decline is ready for training", () => {
     { ...pilot, learning_rate: 0 },
     { ...pilot, settings: { max_seq_length: 0 } },
     { ...pilot, required_context: 2048 },
+    { ...pilot, device_speeds: [1] },
+    { ...pilot, device_speeds: [1, Number.NaN] },
   ])
     assert.throws(
       () => validateAutoCalibrationResult(invalid),

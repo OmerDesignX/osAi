@@ -591,7 +591,16 @@ export async function buildOsAiArgs(
   if (splitMode !== "auto") args.push("--split-mode", splitMode);
   const split = tensorSplit(input.tensorSplit);
   if (split) args.push("--tensor-split", split);
-  for (const device of deviceList(input.devices)) args.push("--device", device);
+  const selectedDevices = deviceList(input.devices);
+  for (const device of selectedDevices) args.push("--device", device);
+  const deviceSpeeds = input.deviceSpeeds ?? [];
+  if (deviceSpeeds.length && deviceSpeeds.length !== selectedDevices.length)
+    throw new Error("GPU speeds must match the selected GPUs");
+  for (const speed of deviceSpeeds) {
+    if (!Number.isFinite(speed) || speed <= 0)
+      throw new Error("GPU speeds must be finite and positive");
+    args.push("--device-speed", String(speed));
+  }
 
   if (needsFineTune) {
     args.push(

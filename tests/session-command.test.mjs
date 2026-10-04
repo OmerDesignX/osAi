@@ -650,6 +650,7 @@ test("a calibrated auto run keeps the pilot's memory settings and learning rate"
         targetModules: ["mlp.down_proj"],
         learningRate: 0.000003,
         devices: "CUDA0, CUDA1",
+        deviceSpeeds: [2.1, 1],
       },
       path.join(root, "sessions"),
     );
@@ -664,6 +665,10 @@ test("a calibrated auto run keeps the pilot's memory settings and learning rate"
     ])
       assert.equal(args[args.indexOf(flag) + 1], value);
     assert.equal(args.filter((value) => value === "--device").length, 2);
+    assert.deepEqual(
+      args.filter((value, index) => args[index - 1] === "--device-speed"),
+      ["2.1", "1"],
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
