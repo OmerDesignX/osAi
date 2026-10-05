@@ -1801,7 +1801,8 @@ export function App() {
                     <SettingInfo label="model and engine">
                       Choose an osCode model or a compatible custom model. Auto
                       selects an available training engine and accelerator;
-                      Multi-GPU can spread GGUF work across detected devices.
+                      Multi-GPU shares one GGUF model across detected GPUs. One
+                      trainer updates the adapter after each step.
                     </SettingInfo>
                   </div>
                   <p>Use an osCode model or choose your own model folder.</p>
@@ -3045,7 +3046,7 @@ export function App() {
                         onChange={(mainGpu) => setForm({ ...form, mainGpu })}
                       />
                       <label className="field">
-                        <span>GGUF split mode</span>
+                        <span>GGUF model sharding</span>
                         <select
                           value={form.splitMode}
                           onChange={(event) =>
@@ -3059,8 +3060,12 @@ export function App() {
                           <option value="auto">Auto</option>
                           <option value="none">None</option>
                           <option value="layer">Layer</option>
-                          <option value="row">Row</option>
-                          <option value="tensor">Tensor</option>
+                          <option value="row" disabled>
+                            Row (unsupported for training)
+                          </option>
+                          <option value="tensor" disabled>
+                            Tensor (unsupported for training)
+                          </option>
                         </select>
                       </label>
                       <label className="field">

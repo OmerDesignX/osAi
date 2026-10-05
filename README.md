@@ -204,7 +204,7 @@ No rollout, critic, reward-model, telemetry, or internet server is started. PPO 
 
 ## Automatic hardware settings and multi-GPU
 
-**Fit settings to this hardware** is enabled by default. After CLI setup, osAi runs a local one-turn inference benchmark with the selected model and each selected GPU. It tries the largest profile allowed by host and reported GPU memory, keeping room for backward graphs and the operating system. Changing the model, accelerator, GPU settings, or attached devices reruns the benchmark and shows a notification. The dataset size does not affect the memory profile. Press **Calibrate** after selecting the dataset. A short training pilot then measures whether a cautious learning rate reduces loss on sampled records. Training stays locked until that pilot succeeds. A short pilot cannot guarantee decreasing loss throughout a long, varied dataset; **Auto stop** watches for sustained increases during the full run.
+**Fit settings to this hardware** is enabled by default. After CLI setup, osAi runs a local one-turn inference benchmark with the selected model across the selected GPUs. It tries the largest profile allowed by host and reported GPU memory, keeping room for backward graphs and the operating system. Changing the model, accelerator, GPU settings, or attached devices reruns the benchmark and shows a notification. The dataset size does not affect the memory profile. Press **Calibrate** after selecting the dataset. A short training pilot then measures whether a cautious learning rate reduces loss on sampled records. Training stays locked until that pilot succeeds. A short pilot cannot guarantee decreasing loss throughout a long, varied dataset; **Auto stop** watches for sustained increases during the full run.
 
 Use **Advanced** to set:
 
@@ -223,9 +223,9 @@ The **Multi-GPU** selector provides:
 | ----------- | -------------------------------------------------------------- |
 | **Auto**    | Uses the compatible devices reported by Metal, CUDA, or Vulkan |
 | **Require** | Requires more than one compatible GPU and stops if unavailable |
-| **Off**     | Uses one selected GPU or CPU fallback                          |
+| **Off**     | Uses one selected GPU or CPU on a CPU-only computer            |
 
-For GGUF training, osAi starts one llama.cpp trainer per compatible GPU, assigns each a distinct round-robin shard of the training records, and publishes the mean of their LoRA updates, weighted by supervised label counts for chat datasets. The combined adapter has rank `selected rank × GPU count`. This is independent data-parallel training with adapter averaging at the end of the run; it does not synchronize gradients after each optimizer step. A required multi-GPU run needs at least one record per GPU. Each GPU needs enough memory for its own model and worker; VRAM is not pooled. Vulkan and Metal automatic selection prefer discrete cards over recognized integrated adapters. Intel Macs can use a Metal eGPU when llama.cpp reports it; Apple silicon Macs do not support eGPUs. MLX uses local NCCL data parallelism on multi-GPU Linux CUDA systems.
+For GGUF fine-tuning and alignment, osAi loads one model across the selected GPUs by layer. A single native trainer performs each optimizer step and saves one adapter at the selected rank. GPU memory is used across the cards, although the largest layer, activations, and device-specific overhead still need to fit on their assigned card. A 3 GiB card can participate when its assigned layers and training graph fit; a large model or full context can still exceed it. Calibration checks backward memory and reports that limit rather than switching to CPU training. Windowing is available for longer records. Vulkan and Metal automatic selection prefer discrete cards over recognized integrated adapters. Intel Macs can use a Metal eGPU when llama.cpp reports it; Apple silicon Macs do not support eGPUs. MLX on Linux CUDA currently uses data-parallel workers, so choose GGUF with llama.cpp for model sharding.
 
 ## Custom models
 
