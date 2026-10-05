@@ -3230,7 +3230,9 @@ export function App() {
                           : "Pause training"}
                     </button>
                   )}
-                  {active.status === "paused" && (
+                  {(active.status === "paused" ||
+                    (active.status === "stopped" &&
+                      Boolean(active.resumeCheckpointPath))) && (
                     <button
                       className="primary-button"
                       disabled={Boolean(sessionControl)}
@@ -3241,7 +3243,9 @@ export function App() {
                       />
                       {sessionControl === "resuming"
                         ? "Resuming…"
-                        : "Resume training"}
+                        : active.status === "stopped"
+                          ? "Resume from checkpoint"
+                          : "Resume training"}
                     </button>
                   )}
                   {(active.status === "running" ||

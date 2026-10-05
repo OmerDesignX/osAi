@@ -191,6 +191,7 @@ export type SessionState = {
   checkpointSavedAt?: string;
   checkpointPath?: string;
   checkpointModelPath?: string;
+  resumeCheckpointPath?: string;
   createdAt: string;
   startedAt?: string;
   endedAt?: string;

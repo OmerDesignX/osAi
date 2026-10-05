@@ -792,6 +792,7 @@ export async function buildOsAiArgs(
       `${input.modelSource === "custom" ? path.basename(input.customModelFolder || "custom") : input.tier}-${input.stage}`,
   );
   if (input.sessionName.trim()) args.push("--session-name", sessionName);
+  args.push("--session-directory", sessionsRoot);
   return { args, sessionName };
 }
 
@@ -1424,7 +1425,7 @@ export class SessionService {
         if (error.code !== "EEXIST") throw error;
       });
     state.status = "stopping";
-    state.message = "Stopping after the current backend operation";
+    state.message = "Saving at the next safe training record";
     await writePrivateJson(
       path.join(state.sessionDirectory, "state.json"),
       state,
@@ -1468,7 +1469,75 @@ export class SessionService {
   }
 
   async resume(id: string) {
+    const state = await this.find(id);
+    if (state.status === "stopped") return this.resumeStopped(state);
     return this.control(id, "resume");
+  }
+
+  private async resumeStopped(state: SessionState) {
+    const directory = state.sessionDirectory;
+    const snapshot = path.join(
+      directory,
+      "outputs",
+      "checkpoint",
+      "adapter",
+      "last.gguf.resume",
+    );
+    if (
+      state.request?.stage !== "fine-tuning" ||
+      !(await fs.stat(snapshot).catch(() => null))?.isFile()
+    )
+      throw new Error("This session has no exact GGUF resume checkpoint");
+    const jobPath = path.join(directory, "job.json");
+    const job = JSON.parse(await fs.readFile(jobPath, "utf8")) as WorkerJob;
+    if (job.id !== state.id || job.stage !== "fine-tuning")
+      throw new Error("The saved training job does not match this session");
+    const index = job.args.indexOf("--session-directory");
+    if (index >= 0) {
+      job.args.splice(index, 2, "--resume-session", directory);
+    } else if (!job.args.includes("--resume-session")) {
+      throw new Error(
+        "This session was created before exact resume was available",
+      );
+    }
+    await fs.rm(job.stopPath, { force: true });
+    await fs.rm(job.pausePath || path.join(directory, "pause.request"), {
+      force: true,
+    });
+    await fs.rm(job.resumePath || path.join(directory, "resume.request"), {
+      force: true,
+    });
+    state.status = "queued";
+    state.message = "Restoring the saved optimizer and dataset position";
+    state.error = undefined;
+    state.endedAt = undefined;
+    state.command = displayCommand(job.executable, job.args);
+    await writePrivateJson(jobPath, job);
+    await writePrivateJson(job.statePath, state);
+    const workerLog = openSync(path.join(directory, "worker.log"), "a", 0o600);
+    let worker;
+    try {
+      worker = spawn(process.execPath, [this.workerScript, jobPath], {
+        cwd: directory,
+        detached: true,
+        stdio: ["ignore", workerLog, workerLog],
+        windowsHide: true,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      });
+    } finally {
+      closeSync(workerLog);
+    }
+    await new Promise<void>((resolve, reject) => {
+      worker.once("spawn", resolve);
+      worker.once("error", reject);
+    }).catch(async (error) => {
+      state.status = "stopped";
+      state.error = error instanceof Error ? error.message : String(error);
+      await writePrivateJson(job.statePath, state);
+      throw error;
+    });
+    worker.unref();
+    return state;
   }
 
   async checkpoint(id: string) {

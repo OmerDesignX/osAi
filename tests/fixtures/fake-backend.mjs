@@ -2,6 +2,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+// The real CLI exits after saving at a record boundary when Stop is requested.
+// Make the detached-worker fixture obey the same control protocol.
+const stopRequest = process.env.OSAI_STOP_REQUEST;
+if (stopRequest) {
+  const stopPoll = setInterval(() => {
+    if (fs.existsSync(stopRequest)) {
+      clearInterval(stopPoll);
+      process.stdout.write("osai: stop requested; checkpoint saved\n");
+      process.exit(0);
+    }
+  }, 50);
+  stopPoll.unref();
+}
+
 if (
   process.argv.includes("--auto-stop") ||
   process.argv.includes("--auto-stop-stalled")

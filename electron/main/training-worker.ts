@@ -26,6 +26,9 @@ let state: SessionState;
 let job: WorkerJob;
 let child: ChildProcess | null = null;
 let stopping = false;
+let forcedStop = false;
+let legacyStop = false;
+let stopTimer: ReturnType<typeof setTimeout> | null = null;
 let paused = false;
 let pauseGeneration = "";
 let autoStopGeneration = "";
@@ -47,6 +50,17 @@ let lastTrainingStep: number | null = null;
 const lastMetric = new Map<string, { at: number; percent: number }>();
 const lossRise = new LossRiseDetector();
 const autoStopCheckpointTimeoutMs = 2 * 60_000;
+const gracefulStopTimeoutMs = 10 * 60_000;
+
+function supportsExactStop() {
+  const engineIndex = job.args.indexOf("--engine");
+  const engine = engineIndex >= 0 ? job.args[engineIndex + 1] : "auto";
+  return (
+    job.stage === "fine-tuning" &&
+    (engine === "llama.cpp" ||
+      (engine === "auto" && process.platform !== "darwin"))
+  );
+}
 
 function disableAutoStop(message: string) {
   state.autoStopEnabled = false;
@@ -732,13 +746,39 @@ async function terminateTree() {
     ? autoStoppedAtPriorCheckpoint
       ? "Auto stop is stopping training with the previous saved checkpoint"
       : "Auto stop saved a checkpoint and is stopping training"
-    : "Stopping the osAi process";
+    : supportsExactStop()
+      ? "Saving an exact resume checkpoint at the next completed record"
+      : "Stopping the training process";
   await scheduleStateWrite(true);
   if (!child?.pid) return;
   if (paused) {
     await setChildPaused(false).catch(() => undefined);
     paused = false;
   }
+  await fs.writeFile(job.stopPath, "stop\n", { mode: 0o600 });
+  if (!supportsExactStop()) {
+    legacyStop = true;
+    await killTree();
+    return;
+  }
+  stopTimer = setTimeout(
+    () => void forceStopAfterTimeout(),
+    gracefulStopTimeoutMs,
+  );
+  stopTimer.unref();
+}
+
+async function forceStopAfterTimeout() {
+  if (!child?.pid || child.exitCode !== null || finalised) return;
+  forcedStop = true;
+  state.error = "The trainer did not confirm a safe stop within ten minutes";
+  state.message = "The trainer did not finish its requested checkpoint";
+  await scheduleStateWrite(true);
+  await killTree();
+}
+
+async function killTree() {
+  if (!child?.pid || child.exitCode !== null || finalised) return;
   if (process.platform === "win32") {
     const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
       windowsHide: true,
@@ -789,6 +829,7 @@ async function finish(
 ) {
   if (finalised) return;
   finalised = true;
+  if (stopTimer) clearTimeout(stopTimer);
   if (writeTimer) clearTimeout(writeTimer);
   state.status = status;
   state.phase = status === "completed" ? "complete" : state.phase;
@@ -796,6 +837,18 @@ async function finish(
   state.indeterminate = false;
   state.exitCode = code;
   state.endedAt = new Date().toISOString();
+  if (status === "stopped") {
+    const snapshot = path.join(
+      job.sessionDirectory,
+      "outputs",
+      "checkpoint",
+      "adapter",
+      "last.gguf.resume",
+    );
+    if ((await fs.stat(snapshot).catch(() => null))?.isFile()) {
+      state.resumeCheckpointPath = snapshot;
+    }
+  }
   state.message =
     status === "completed"
       ? "Training completed successfully"
@@ -804,7 +857,9 @@ async function finish(
           ? autoStoppedAtPriorCheckpoint
             ? "Auto stop used the previous saved checkpoint after the latest save stalled"
             : "Auto stop saved a checkpoint after sustained rising loss"
-          : "Training stopped by the user"
+          : state.resumeCheckpointPath
+            ? "Training stopped; exact resume checkpoint is ready"
+            : "Training stopped by the user"
         : "Training failed; open the log for details";
   if (error) state.error = error.slice(0, 1000);
   await metricWrites.catch(() => undefined);
@@ -826,14 +881,13 @@ async function main() {
   state.indeterminate = true;
   state.message = "Checking the model and local training backend";
   await atomicStateWrite();
-  await fs.writeFile(
-    path.join(job.sessionDirectory, "metrics.csv"),
-    metricHeader,
-    {
-      encoding: "utf8",
-      mode: 0o600,
-    },
-  );
+  if (!job.args.includes("--resume-session")) {
+    await fs.writeFile(
+      path.join(job.sessionDirectory, "metrics.csv"),
+      metricHeader,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  }
   const log = createWriteStream(job.logPath, { flags: "a", mode: 0o600 });
   log.write(`[osAi App] ${state.startedAt}\n[osAi App] ${state.command}\n\n`);
   const backendEnvironment = await backendRuntimeEnvironment(job.executable);
@@ -848,6 +902,7 @@ async function main() {
       PYTHONUNBUFFERED: "1",
       PYTHONIOENCODING: "utf-8",
       OSAI_APP_SESSION: job.id,
+      OSAI_STOP_REQUEST: job.stopPath,
       ...(job.checkpointRequestPath
         ? { OSAI_CHECKPOINT_REQUEST: job.checkpointRequestPath }
         : {}),
@@ -898,8 +953,15 @@ async function main() {
       log.write(`\n[osAi App] ${error.message}\n`);
       complete("failed", null, error.message);
     });
-    child?.once("close", (code, signal) => {
-      const status = stopping ? "stopped" : code === 0 ? "completed" : "failed";
+    child?.once("close", async (code, signal) => {
+      const stopRequested = stopping || (await exists(job.stopPath));
+      const status = forcedStop
+        ? "failed"
+        : stopRequested && (code === 0 || legacyStop)
+          ? "stopped"
+          : code === 0
+            ? "completed"
+            : "failed";
       const error =
         status === "failed"
           ? actionableStderrLine ||
