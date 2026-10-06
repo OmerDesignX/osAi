@@ -388,6 +388,7 @@ p {
 .backend-onboarding-content {
   width: min(460px, 100%);
   min-width: 0;
+  margin: auto;
   display: grid;
   justify-items: center;
   text-align: center;
@@ -415,6 +416,28 @@ p {
   color: var(--muted);
   font-size: 14px;
   line-height: 1.6;
+}
+
+.onboarding-permission-note {
+  width: 100%;
+  max-width: 430px;
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel2);
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.onboarding-permission-note strong {
+  color: var(--text);
+}
+
+.onboarding-permission-note p {
+  margin-top: 6px;
+  color: var(--muted);
 }
 
 .onboarding-download {

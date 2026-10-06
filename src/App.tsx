@@ -3857,6 +3857,18 @@ export function App() {
               llama.cpp for this computer. Setup uses the available GPU
               toolchain when possible.
             </p>
+            {window.osai.platform === "win32" && (
+              <aside className="onboarding-permission-note" role="note">
+                <strong>A Windows permission prompt may appear</strong>
+                <p>
+                  If the Microsoft Visual C++ runtime is missing or needs an
+                  update, Windows may ask for administrator permission during
+                  GPU setup. This is a normal setup step. Choose Yes when the
+                  publisher is Microsoft Corporation to continue. Setup will not
+                  restart your computer.
+                </p>
+              </aside>
+            )}
             <button
               className="primary-button onboarding-download"
               disabled={
