@@ -244,6 +244,21 @@ function cleanSetupLine(line: string) {
   return line.replace(/\s+/g, " ").trim().slice(0, 220);
 }
 
+export function backendSetupFailureMessage(
+  log: string,
+  code: number,
+  logPath: string,
+) {
+  const details = log.trim().slice(-16_000);
+  return [
+    `osAi CLI setup failed (exit code ${code}).`,
+    details,
+    `Full setup log: ${logPath}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 async function downloadSource(
   archiveUrl: string,
   destination: string,
@@ -460,7 +475,7 @@ export class BackendInstaller {
           env: setupEnvironment,
           onLine: (line) => {
             const cleaned = cleanSetupLine(line);
-            log = (log + `${cleaned}\n`).slice(-2_000_000);
+            log = (log + `${line}\n`).slice(-2_000_000);
             const progress = cleaned.match(/^\[(\d+)\/(\d+)\]/);
             const percent = progress
               ? 70 +
@@ -479,9 +494,10 @@ export class BackendInstaller {
       await fs.writeFile(installLog, log, { mode: 0o600 });
       if (setup.code !== 0)
         throw new Error(
-          cleanSetupLine(
-            setup.stderr.trim().split(/\r?\n/).filter(Boolean).at(-1) ||
-              "osAi setup failed",
+          backendSetupFailureMessage(
+            log,
+            setup.code,
+            path.join(this.installationsRoot, "last-install.log"),
           ),
         );
 

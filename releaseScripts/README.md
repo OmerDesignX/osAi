@@ -17,6 +17,8 @@ Each script synchronizes `package.json` from the root version file, installs loc
 
 On first launch, the installed App downloads the osAi CLI repository from the URL in `backend-source.json`, installs its Python dependencies, and compiles llama.cpp on that computer. Each native release bundles pinned CMake and Ninja tools. The CLI code must be pushed to GitHub before a release can download those changes. CUDA compilation uses a compatible CUDA Toolkit when present. On Windows, setup uses Microsoft C++ Build Tools when present or downloads a verified portable compiler, and downloads a verified Vulkan SDK into its private build cache when a Vulkan runtime is present and the SDK is missing. If a combined CUDA and Vulkan build fails, setup tries CUDA and then Vulkan. A machine with an available GPU reports a build failure instead of silently installing only a CPU trainer. macOS uses Metal when available; Apple silicon with macOS 14 or newer can also use MLX.
 
+Windows backend setup checks that the Vulkan shader compiler can start before building. If the Microsoft C++ runtime is missing or outdated, it downloads a pinned, SHA-256-verified Microsoft x64 Redistributable and installs it without restarting Windows. This prerequisite may request administrator approval. The App keeps complete setup diagnostics in `last-install.log` and shows the recent compiler output in its error dialog.
+
 macOS produces:
 
 - `osAi-<version>-mac-arm64.dmg`

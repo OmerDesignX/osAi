@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   EXTRACT_ARCHIVE,
+  backendSetupFailureMessage,
   backendInstallationIsCurrent,
   backendExecutablePath,
   bundledPythonExecutable,
@@ -15,6 +16,29 @@ import {
   backendRuntimeEnvironment,
   managedBackendSource,
 } from "../dist-electron/main/backend-source.js";
+
+test("setup failure retains compiler diagnostics and the persistent log path", () => {
+  const compilerCommand = "glslc.exe " + "shader-path/".repeat(30);
+  const log = [
+    compilerCommand,
+    "cannot compile acc_f32 (exit code -1073741515)",
+    "ninja: build stopped: subcommand failed.",
+    "osai setup: Command '[python.exe, -m, osai, build-llama]' failed.",
+  ].join("\n");
+  const logPath = path.join("backend", "installations", "last-install.log");
+  const message = backendSetupFailureMessage(log, 2, logPath);
+  assert.ok(message.includes(compilerCommand));
+  assert.ok(message.includes("cannot compile acc_f32"));
+  assert.ok(message.includes("exit code 2"));
+  assert.ok(message.endsWith(`Full setup log: ${logPath}`));
+});
+
+test("setup failure bounds dialog output while retaining recent diagnostics", () => {
+  const log = "old output\n".repeat(10000) + "compiler failure at the end";
+  const message = backendSetupFailureMessage(log, 2, "last-install.log");
+  assert.ok(message.length < 16_200);
+  assert.ok(message.includes("compiler failure at the end"));
+});
 
 const testPython = [process.env.OSAI_TEST_PYTHON, "python3", "python"].find(
   (candidate) =>
