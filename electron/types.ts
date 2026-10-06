@@ -240,6 +240,7 @@ export type GpuSnapshot = {
   utilizationPercent: number | null;
   temperatureC: number | null;
   note: string;
+  driverProblemCode?: number;
 };
 
 export type HardwareSnapshot = {

@@ -7,7 +7,93 @@ import {
   parseMetalGpus,
   parseNvidiaGpus,
   parseVulkanGpus,
+  parseWindowsGpus,
 } from "../dist-electron/main/hardware-snapshot.js";
+
+for (const count of [3, 4, 8]) {
+  test(`hardware sheet retains all ${count} identical-model GPUs`, () => {
+    const devices = parseWindowsGpus(
+      JSON.stringify(
+        Array.from({ length: count }, (_, index) => ({
+          Name: "NVIDIA GeForce GTX 980",
+          PNPDeviceID: `PCI-GPU-${index}`,
+          ConfigManagerErrorCode: 0,
+        })),
+      ),
+    );
+    const telemetry = parseNvidiaGpus(
+      Array.from(
+        { length: count },
+        (_, index) =>
+          `${index}, NVIDIA GeForce GTX 980, 4096, ${index * 10}, 0, ${50 + index}`,
+      ).join("\n"),
+    );
+    mergeGpuInventory(devices, telemetry);
+    assert.equal(devices.length, count);
+    assert.ok(devices.every((gpu) => gpu.backend === "CUDA"));
+    assert.equal(new Set(devices.map((gpu) => gpu.id)).size, count);
+  });
+}
+
+test("a Windows Code 43 card stays unavailable beside identical working GPUs", () => {
+  const devices = parseWindowsGpus(
+    JSON.stringify([
+      {
+        Name: "NVIDIA GeForce GTX 980",
+        PNPDeviceID: "PCI-BLOCKED",
+        ConfigManagerErrorCode: 43,
+      },
+      {
+        Name: "NVIDIA GeForce GTX 980",
+        PNPDeviceID: "PCI-ONE",
+        ConfigManagerErrorCode: 0,
+      },
+      {
+        Name: "NVIDIA GeForce GTX 980",
+        PNPDeviceID: "PCI-TWO",
+        ConfigManagerErrorCode: 0,
+      },
+    ]),
+  );
+  mergeGpuInventory(
+    devices,
+    parseVulkanGpus(
+      "GPU0:\n  deviceName = NVIDIA GeForce GTX 980\nGPU1:\n  deviceName = NVIDIA GeForce GTX 980\n",
+    ),
+  );
+  mergeGpuInventory(
+    devices,
+    parseNvidiaGpus(
+      "0, NVIDIA GeForce GTX 980, 4096, 900, 0, 55\n1, NVIDIA GeForce GTX 980, 4096, 0, 0, 51\n",
+    ),
+  );
+  assert.equal(devices.length, 3);
+  const blocked = devices.find((gpu) => gpu.driverProblemCode === 43);
+  assert.equal(blocked.backend, "Unavailable");
+  assert.match(blocked.note, /Code 43.*Device Manager/);
+  assert.equal(blocked.memoryTotalBytes, null);
+  assert.equal(blocked.utilizationPercent, null);
+  assert.deepEqual(
+    devices
+      .filter((gpu) => gpu.backend === "CUDA")
+      .map((gpu) => gpu.temperatureC),
+    [55, 51],
+  );
+});
+
+test("Windows inventory reports device errors without inventing GPU memory", () => {
+  const [gpu] = parseWindowsGpus(
+    JSON.stringify({
+      Name: "AMD Radeon",
+      ConfigManagerErrorCode: 22,
+      AdapterRAM: 4294967295,
+    }),
+  );
+  assert.equal(gpu.driverProblemCode, 22);
+  assert.equal(gpu.memoryTotalBytes, null);
+  assert.match(gpu.note, /Code 22/);
+  assert.deepEqual(parseWindowsGpus("not JSON"), []);
+});
 
 test("hardware sheet keeps distinct GPUs with identical model names", () => {
   const vulkan = parseVulkanGpus(`Devices:

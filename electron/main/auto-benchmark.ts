@@ -58,9 +58,10 @@ export function autoBenchmarkArgs(input: TrainingRequest) {
     .filter(Boolean);
   if (
     devices.length > 64 ||
+    new Set(devices).size !== devices.length ||
     devices.some((value) => value.length > 128 || /[\r\n\0]/.test(value))
   )
-    throw new Error("Invalid GPU device list");
+    throw new Error("GPU device list must contain distinct valid devices");
   for (const device of devices) args.push("--device", device);
   return args;
 }

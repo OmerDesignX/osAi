@@ -57,7 +57,10 @@ export function mergeGpuInventory(
   const matched = new Set<GpuSnapshot>();
   for (const gpu of inventory) {
     const existing = gpus.find(
-      (item) => gpuKey(item.name) === gpuKey(gpu.name) && !matched.has(item),
+      (item) =>
+        !(item.driverProblemCode || gpu.driverProblemCode) &&
+        gpuKey(item.name) === gpuKey(gpu.name) &&
+        !matched.has(item),
     );
     if (!existing) {
       gpus.push(gpu);
@@ -221,12 +224,7 @@ async function vulkanGpus(): Promise<GpuSnapshot[]> {
   return parseVulkanGpus(await output("vulkaninfo", ["--summary"]));
 }
 
-async function windowsGpus(): Promise<GpuSnapshot[]> {
-  const report = await output("powershell.exe", [
-    "-NoProfile",
-    "-Command",
-    "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress",
-  ]);
+export function parseWindowsGpus(report: string): GpuSnapshot[] {
   try {
     const parsed = JSON.parse(report) as
       Record<string, unknown> | Record<string, unknown>[];
@@ -235,20 +233,40 @@ async function windowsGpus(): Promise<GpuSnapshot[]> {
         (item) =>
           typeof item.Name === "string" && !/basic display/i.test(item.Name),
       )
-      .map((item, index) => ({
-        id: `windows-${index}`,
-        name: String(item.Name),
-        backend: "Detected by OS",
-        // Win32_VideoController.AdapterRAM is limited to 32 bits on many drivers.
-        memoryTotalBytes: null,
-        memoryUsedBytes: null,
-        utilizationPercent: null,
-        temperatureC: null,
-        note: "Live telemetry unavailable from this driver",
-      }));
+      .map((item, index) => {
+        const code = Number(item.ConfigManagerErrorCode ?? 0);
+        const problem = Number.isInteger(code) && code > 0 ? code : undefined;
+        return {
+          id: `windows-${String(item.PNPDeviceID || index)}`,
+          name: String(item.Name),
+          backend: problem ? "Unavailable" : "Detected by OS",
+          // Win32_VideoController.AdapterRAM is limited to 32 bits on many drivers.
+          memoryTotalBytes: null,
+          memoryUsedBytes: null,
+          utilizationPercent: null,
+          temperatureC: null,
+          driverProblemCode: problem,
+          note:
+            problem === 43
+              ? "Windows stopped this GPU (Code 43). Check its driver in Device Manager."
+              : problem
+                ? `Windows device error (Code ${problem}). Check this GPU in Device Manager.`
+                : "Live telemetry unavailable from this driver",
+        };
+      });
   } catch {
     return [];
   }
+}
+
+async function windowsGpus(): Promise<GpuSnapshot[]> {
+  return parseWindowsGpus(
+    await output("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      "Get-CimInstance Win32_VideoController | Select-Object Name,PNPDeviceID,ConfigManagerErrorCode | ConvertTo-Json -Compress",
+    ]),
+  );
 }
 
 export function parseMetalGpus(

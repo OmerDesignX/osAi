@@ -221,11 +221,13 @@ The **Multi-GPU** selector provides:
 
 | Selection   | Behaviour                                                      |
 | ----------- | -------------------------------------------------------------- |
-| **Auto**    | Uses the compatible devices reported by Metal, CUDA, or Vulkan |
+| **Auto**    | Uses all compatible devices reported by Metal, CUDA, or Vulkan |
 | **Require** | Requires more than one compatible GPU and stops if unavailable |
 | **Off**     | Uses one selected GPU or CPU on a CPU-only computer            |
 
 For GGUF fine-tuning and alignment, osAi loads one model across the selected GPUs by layer. A single native trainer performs each optimizer step and saves one adapter at the selected rank. GPU memory is used across the cards, although the largest layer, activations, and device-specific overhead still need to fit on their assigned card. A 3 GiB card can participate when its assigned layers and training graph fit; a large model or full context can still exceed it. Calibration checks backward memory and reports that limit rather than switching to CPU training. Windowing is available for longer records. Vulkan and Metal automatic selection prefer discrete cards over recognized integrated adapters. Intel Macs can use a Metal eGPU when llama.cpp reports it; Apple silicon Macs do not support eGPUs. MLX on Linux CUDA currently uses data-parallel workers, so choose GGUF with llama.cpp for model sharding.
+
+There is no two-GPU limit for GGUF model sharding. Three or more compatible GPUs can share the same model. Leave **Device order** and **Tensor split** empty to select all devices available to the chosen backend and distribute layers automatically. A manual split needs one positive weight per GPU, such as `1,1,1` for three cards. The hardware panel keeps every OS-reported card visible and shows Windows device errors, including Code 43, without labelling an unavailable card as a working CUDA or Vulkan device. Resolve that card's driver issue in Device Manager before it can participate in training.
 
 ## Custom models
 

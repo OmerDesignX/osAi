@@ -49,6 +49,39 @@ test("calibration uses the selected dataset, devices and context mode", () => {
   );
 });
 
+for (const count of [3, 4, 8]) {
+  test(`calibration passes all ${count} GPUs and split weights in order`, () => {
+    const devices = Array.from(
+      { length: count },
+      (_, index) => `Vulkan${index}`,
+    );
+    const args = autoCalibrationArgs({
+      ...request,
+      accelerator: "vulkan",
+      devices: devices.join(", "),
+      splitMode: "layer",
+      tensorSplit: devices.map(() => 1).join(","),
+      mainGpu: count - 1,
+    });
+    assert.deepEqual(
+      args.filter((_, index) => args[index - 1] === "--device"),
+      devices,
+    );
+    assert.equal(
+      args[args.indexOf("--tensor-split") + 1],
+      devices.map(() => 1).join(","),
+    );
+    assert.equal(args[args.indexOf("--main-gpu") + 1], String(count - 1));
+  });
+}
+
+test("calibration refuses to count the same GPU twice", () => {
+  assert.throws(
+    () => autoCalibrationArgs({ ...request, devices: "CUDA0,CUDA1,CUDA1" }),
+    /distinct/,
+  );
+});
+
 test("model, data, optimizer and epoch changes invalidate calibration", () => {
   for (const change of [
     { fineTuneData: "C:\\different.jsonl" },

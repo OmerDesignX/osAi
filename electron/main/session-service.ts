@@ -215,12 +215,13 @@ function deviceList(value: string | undefined) {
     .filter(Boolean);
   if (
     devices.length > 64 ||
+    new Set(devices).size !== devices.length ||
     devices.some(
       (device) =>
         device.length > 128 || device.includes("\0") || /[\r\n]/.test(device),
     )
   )
-    throw new Error("Device order contains an invalid device name");
+    throw new Error("Device order must contain distinct valid device names");
   return devices;
 }
 

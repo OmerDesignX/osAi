@@ -74,6 +74,56 @@ const base = {
   devices: "",
 };
 
+for (const count of [3, 4, 8]) {
+  test(`training passes all ${count} devices and layer-sharding weights`, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-multi-gpu-"));
+    try {
+      const fine = path.join(root, "fine");
+      await fs.mkdir(fine);
+      const devices = Array.from(
+        { length: count },
+        (_, index) => `Vulkan${index}`,
+      );
+      const { args } = await buildOsAiArgs(
+        {
+          ...base,
+          stage: "fine-tuning",
+          fineTuneData: fine,
+          devices: devices.join(", "),
+          splitMode: "layer",
+          tensorSplit: devices.map(() => 1).join(","),
+          mainGpu: count - 1,
+        },
+        path.join(root, "sessions"),
+      );
+      assert.deepEqual(
+        args.filter((_, index) => args[index - 1] === "--device"),
+        devices,
+      );
+      assert.equal(args[args.indexOf("--split-mode") + 1], "layer");
+      assert.equal(
+        args[args.indexOf("--tensor-split") + 1],
+        devices.map(() => 1).join(","),
+      );
+      assert.equal(args[args.indexOf("--main-gpu") + 1], String(count - 1));
+      await assert.rejects(
+        buildOsAiArgs(
+          {
+            ...base,
+            stage: "fine-tuning",
+            fineTuneData: fine,
+            devices: "CUDA0,CUDA1,CUDA1",
+          },
+          path.join(root, "sessions"),
+        ),
+        /distinct/,
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("accepts only a real osAi CLI version response", () => {
   assert.equal(osAiVersionFromOutput("osai 0.1.0\n"), "osai 0.1.0");
   assert.equal(

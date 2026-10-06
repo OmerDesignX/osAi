@@ -1801,8 +1801,9 @@ export function App() {
                     <SettingInfo label="model and engine">
                       Choose an osCode model or a compatible custom model. Auto
                       selects an available training engine and accelerator;
-                      Multi-GPU shares one GGUF model across detected GPUs. One
-                      trainer updates the adapter after each step.
+                      Multi-GPU Auto shares one GGUF model across all GPUs
+                      available to the selected backend, including three or more
+                      cards. One trainer updates the adapter after each step.
                     </SettingInfo>
                   </div>
                   <p>Use an osCode model or choose your own model folder.</p>
@@ -3006,7 +3007,11 @@ export function App() {
                   <section className="advanced-group">
                     <div className="advanced-heading">
                       <h3>Engine runtime</h3>
-                      <p>GGUF execution and explicit multi-GPU placement.</p>
+                      <p>
+                        GGUF layer sharding across all available GPUs. Leave
+                        device order and tensor split empty for automatic
+                        placement.
+                      </p>
                     </div>
                     <div className="advanced-grid">
                       <NumberField
@@ -3072,7 +3077,7 @@ export function App() {
                         <span>Tensor split</span>
                         <input
                           value={form.tensorSplit}
-                          placeholder="Example: 3,1"
+                          placeholder="One weight per GPU, e.g. 1,1,1"
                           spellCheck={false}
                           onChange={(event) =>
                             setForm({
@@ -3086,7 +3091,7 @@ export function App() {
                         <span>Device order</span>
                         <input
                           value={form.devices}
-                          placeholder="Example: CUDA0, CUDA1"
+                          placeholder="Example: CUDA0, CUDA1, CUDA2"
                           spellCheck={false}
                           onChange={(event) =>
                             setForm({ ...form, devices: event.target.value })
@@ -4064,7 +4069,8 @@ export function App() {
                         <div>
                           <dt>Status</dt>
                           <dd>
-                            {gpu.utilizationPercent === null
+                            {gpu.driverProblemCode ||
+                            gpu.utilizationPercent === null
                               ? gpu.note
                               : gpu.utilizationPercent > 1
                                 ? "Active"
@@ -4109,7 +4115,10 @@ export function App() {
             )}
             <p className="hardware-note">
               GPU memory is per device. Metal on Apple silicon shares system
-              memory. Some drivers do not expose temperature or load.
+              memory. GGUF Multi-GPU Auto uses all GPUs available to the
+              selected backend. A card with a Windows device error cannot join
+              training until its driver issue is resolved. Some drivers do not
+              expose temperature or load.
             </p>
           </aside>
         </div>
