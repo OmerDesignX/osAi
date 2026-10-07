@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import {
   autoCalibrationArgs,
@@ -15,7 +16,7 @@ const request = {
   accelerator: "cuda",
   multiGpu: "on",
   devices: "CUDA0, CUDA1",
-  fineTuneData: "C:\\Users\\oa\\dataTrain\\openThoughts\\train.jsonl",
+  fineTuneData: path.resolve("test-fixtures", "train.jsonl"),
   fullContentContext: false,
   optimizer: "auto",
   iterations: 1,
@@ -84,7 +85,7 @@ test("calibration refuses to count the same GPU twice", () => {
 
 test("model, data, optimizer and epoch changes invalidate calibration", () => {
   for (const change of [
-    { fineTuneData: "C:\\different.jsonl" },
+    { fineTuneData: path.resolve("different.jsonl") },
     { modelVersion: "v1" },
     { optimizer: "adamw" },
     { iterations: 2 },

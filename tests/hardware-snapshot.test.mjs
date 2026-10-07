@@ -122,7 +122,7 @@ GPU2:
   );
 });
 
-test("Metal inventory lists Apple silicon and Intel Mac external GPUs without inventing usage", () => {
+test("Metal inventory lists Apple silicon and every physical Intel Mac GPU without inventing usage", () => {
   const apple = parseMetalGpus(
     JSON.stringify({
       SPDisplaysDataType: [
@@ -140,6 +140,16 @@ test("Metal inventory lists Apple silicon and Intel Mac external GPUs without in
     JSON.stringify({
       SPDisplaysDataType: [
         {
+          sppci_model: "AMD FirePro D700",
+          spdisplays_vram: "6 GB",
+          spdisplays_bus: "PCIe",
+        },
+        {
+          sppci_model: "AMD FirePro D700",
+          spdisplays_vram: "6 GB",
+          spdisplays_bus: "PCIe",
+        },
+        {
           sppci_model: "AMD Radeon Pro 580",
           spdisplays_vram: "8 GB",
           spdisplays_bus: "eGPU",
@@ -149,8 +159,19 @@ test("Metal inventory lists Apple silicon and Intel Mac external GPUs without in
     "x64",
     32 * 1024 ** 3,
   );
-  assert.equal(intel[0].memoryTotalBytes, 8 * 1024 ** 3);
-  assert.equal(intel[0].note, "External GPU");
+  assert.equal(intel.length, 3);
+  assert.deepEqual(
+    intel.map((gpu) => gpu.name),
+    ["AMD FirePro D700", "AMD FirePro D700", "AMD Radeon Pro 580"],
+  );
+  assert.deepEqual(
+    intel.map((gpu) => gpu.id),
+    ["metal-0", "metal-1", "metal-2"],
+  );
+  assert.equal(intel[0].memoryTotalBytes, 6 * 1024 ** 3);
+  assert.equal(intel[1].memoryTotalBytes, 6 * 1024 ** 3);
+  assert.equal(intel[2].memoryTotalBytes, 8 * 1024 ** 3);
+  assert.equal(intel[2].note, "External GPU");
 });
 
 test("AMD SMI fills Vulkan memory, load and temperature without duplicating the GPU", () => {

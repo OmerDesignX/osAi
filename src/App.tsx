@@ -4115,10 +4115,11 @@ export function App() {
             )}
             <p className="hardware-note">
               GPU memory is per device. Metal on Apple silicon shares system
-              memory. GGUF Multi-GPU Auto uses all GPUs available to the
-              selected backend. A card with a Windows device error cannot join
-              training until its driver issue is resolved. Some drivers do not
-              expose temperature or load.
+              memory as one unified GPU. On Intel Macs, GGUF Multi-GPU Auto
+              shards across all discrete Metal GPUs reported by llama.cpp,
+              including dual-GPU Mac Pro systems and compatible eGPUs. A card
+              with a Windows device error cannot join training until its driver
+              issue is resolved. Some drivers do not expose temperature or load.
             </p>
           </aside>
         </div>
