@@ -1479,6 +1479,13 @@ export class SessionService {
     const directory = state.sessionDirectory;
     const snapshot = path.join(
       directory,
+      ".internal",
+      "checkpoint",
+      "adapter",
+      "last.gguf.resume",
+    );
+    const legacySnapshot = path.join(
+      directory,
       "outputs",
       "checkpoint",
       "adapter",
@@ -1486,7 +1493,8 @@ export class SessionService {
     );
     if (
       state.request?.stage !== "fine-tuning" ||
-      !(await fs.stat(snapshot).catch(() => null))?.isFile()
+      (!(await fs.stat(snapshot).catch(() => null))?.isFile() &&
+        !(await fs.stat(legacySnapshot).catch(() => null))?.isFile())
     )
       throw new Error("This session has no exact GGUF resume checkpoint");
     const jobPath = path.join(directory, "job.json");
@@ -1541,7 +1549,7 @@ export class SessionService {
     return state;
   }
 
-  async checkpoint(id: string) {
+  async checkpoint(id: string, directory?: string) {
     const state = await this.find(id);
     if (state.status !== "running" && state.status !== "paused")
       throw new Error("Start or resume training before saving a checkpoint");
@@ -1557,8 +1565,26 @@ export class SessionService {
       throw new Error(
         "Checkpoint saving is available for sessions started by this version of osAi",
       );
+    const chosen = path.resolve(
+      directory || path.join(state.sessionDirectory, "outputs"),
+    );
+    if (!directory) await fs.mkdir(chosen, { recursive: true });
+    if (!(await fs.stat(chosen).catch(() => null))?.isDirectory())
+      throw new Error("Choose an existing folder for the checkpoint");
+    const generation = randomUUID();
+    const exportRequest = path.join(
+      state.sessionDirectory,
+      "checkpoint-export.json",
+    );
+    const exportPending = `${exportRequest}.${process.pid}.pending`;
+    await fs.writeFile(
+      exportPending,
+      JSON.stringify({ generation, directory: chosen }),
+      { mode: 0o600 },
+    );
+    await fs.rename(exportPending, exportRequest);
     const pending = `${request}.${process.pid}.pending`;
-    await fs.writeFile(pending, `${randomUUID()}\n`, { mode: 0o600 });
+    await fs.writeFile(pending, `${generation}\n`, { mode: 0o600 });
     await fs.rename(pending, request);
     return { ...state, checkpointStatus: "requested" as const };
   }

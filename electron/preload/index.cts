@@ -49,6 +49,8 @@ const bridge: OsAiBridge = {
   pauseTraining: (id: string) => ipcRenderer.invoke("training:pause", id),
   resumeTraining: (id: string) => ipcRenderer.invoke("training:resume", id),
   saveCheckpoint: (id: string) => ipcRenderer.invoke("training:checkpoint", id),
+  exportMergedModel: (source: string, destination: string) =>
+    ipcRenderer.invoke("model:export-merged", source, destination),
   setAutoStop: (id: string, enabled: boolean) =>
     ipcRenderer.invoke("training:auto-stop", id, enabled),
   stopTraining: (id: string) => ipcRenderer.invoke("training:stop", id),

@@ -949,7 +949,7 @@ const wikiEntries: WikiEntry[] = [
     level: "Reference",
     title: "Session outputs and deployment",
     summary:
-      "Know where adapters, rollouts, manifests, logs, and final quantized bundles are stored.",
+      "Know where adapters, standalone merged models, logs, and manifests are stored.",
     search:
       "output session folder adapter base plus adapter merged model deployment manifest logs rollouts fusion hash quantized",
     content: (
@@ -959,14 +959,16 @@ const wikiEntries: WikiEntry[] = [
 ├── logs/
 ├── rollouts/                    alignment audit data
 └── outputs/
-    ├── base-plus-adapter/
-    └── merged-model/            standalone residual bundle`}</Code>
+    └── gguf/                    or mlx/
+        ├── model/               original GGUF shards and projector
+        ├── osai_adapter.gguf     latest LoRA adapter
+        ├── osai_fusion.json
+        └── merged.gguf          standalone fused weights`}</Code>
         <p>
-          The “merged” deployment does not rewrite the quantized base into full
-          precision. MLX keeps original quantized tensors and embeds the exact
-          adapter residual. GGUF keeps the original model and projector files
-          and records the exact GGUF adapter. Manifests and SHA-256 checks bind
-          the parts together.
+          GGUF saves the original shards and adapter beside a standalone
+          quantized merged GGUF. MLX saves its adapter beside a fused model in
+          <code> outputs/mlx/merged/</code>. Resume data and checkpoint
+          acknowledgments stay under the session’s private .internal folder.
         </p>
         <p>
           Keep the manifest with the output. It records how to load the model

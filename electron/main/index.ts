@@ -434,9 +434,18 @@ function registerIpc() {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.resume(id);
   });
-  ipcMain.handle("training:checkpoint", (_event, id: unknown) => {
+  ipcMain.handle("training:checkpoint", async (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
-    return sessionService.checkpoint(id);
+    const state = await sessionService.find(id);
+    const output = path.join(state.sessionDirectory, "outputs");
+    await fs.mkdir(output, { recursive: true });
+    const chosen = await dialog.showOpenDialog(mainWindow!, {
+      title: "Save adapter and merged model",
+      defaultPath: output,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (chosen.canceled || !chosen.filePaths[0]) return null;
+    return sessionService.checkpoint(id, chosen.filePaths[0]);
   });
   ipcMain.handle(
     "training:auto-stop",
@@ -502,27 +511,98 @@ function registerIpc() {
   ipcMain.handle("training:artifacts", async (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     const state = await sessionService.find(id);
-    if (state.status !== "completed")
-      return { mergedModel: null, adapterDirectory: null };
     const outputs = path.join(state.sessionDirectory, "outputs");
-    const mergedModel = path.join(outputs, "merged-model");
-    const ggufManifest = path.join(mergedModel, "gguf", "osai_fusion.json");
-    const mlxManifest = path.join(mergedModel, "mlx", "osai_fusion.json");
-    const adapterDirectory = path.join(
-      outputs,
-      "base-plus-adapter",
-      "adapters",
+    const gguf = path.join(outputs, "gguf");
+    const mlx = path.join(outputs, "mlx");
+    const legacy = path.join(outputs, "merged-model");
+    const ggufReady = Boolean(
+      (
+        await fs.stat(path.join(gguf, "merged.gguf")).catch(() => null)
+      )?.isFile(),
     );
-    const [gguf, mlx, adapters] = await Promise.all([
-      fs.stat(ggufManifest).catch(() => null),
-      fs.stat(mlxManifest).catch(() => null),
-      fs.readdir(adapterDirectory).catch(() => []),
-    ]);
+    const mlxReady = Boolean(
+      (
+        await fs.stat(path.join(mlx, "merged", "config.json")).catch(() => null)
+      )?.isFile(),
+    );
+    const adapter = ggufReady ? gguf : mlxReady ? mlx : null;
     return {
-      mergedModel: gguf?.isFile() || mlx?.isFile() ? mergedModel : null,
-      adapterDirectory: adapters.length ? adapterDirectory : null,
+      mergedModel: ggufReady
+        ? gguf
+        : mlxReady
+          ? mlx
+          : (
+                await fs
+                  .stat(path.join(legacy, "gguf", "osai_fusion.json"))
+                  .catch(() => null)
+              )?.isFile()
+            ? legacy
+            : null,
+      adapterDirectory: adapter,
     };
   });
+  ipcMain.handle(
+    "model:export-merged",
+    async (_event, source: unknown, destination: unknown) => {
+      if (typeof source !== "string" || typeof destination !== "string")
+        throw new Error("Choose a model folder and save location");
+      if (
+        !(await fs.stat(source).catch(() => null))?.isDirectory() ||
+        !(await fs.stat(destination).catch(() => null))?.isDirectory()
+      )
+        throw new Error("The selected model or save folder does not exist");
+      const backend = await sessionService.backendStatus();
+      if (
+        !backend.available ||
+        !(await backendInstaller.isCurrent(backend.executable))
+      )
+        throw new Error(
+          "Install the current osAi CLI before exporting a merged model",
+        );
+      const args = [
+        "export-merged",
+        "--source",
+        source,
+        "--output",
+        destination,
+      ];
+      return new Promise<string>((resolve, reject) => {
+        const child = spawn(backend.executable, args, {
+          windowsHide: true,
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let output = "";
+        const append = (chunk: Buffer) => {
+          output = (output + chunk.toString("utf8")).slice(-20_000);
+        };
+        child.stdout?.on("data", append);
+        child.stderr?.on("data", append);
+        child.once("error", reject);
+        child.once("close", (code) => {
+          if (code !== 0) {
+            reject(
+              new Error(
+                output.trim().split(/\r?\n/).at(-1) ||
+                  `Export failed (${code})`,
+              ),
+            );
+            return;
+          }
+          const line = output
+            .trim()
+            .split(/\r?\n/)
+            .filter((item) => item.includes('"merged_model"'))
+            .at(-1);
+          try {
+            resolve(JSON.parse(line || "").merged_model as string);
+          } catch {
+            reject(new Error("Export completed without a model path"));
+          }
+        });
+      });
+    },
+  );
   ipcMain.handle("training:open-artifacts", async (_event, id: unknown) => {
     if (typeof id !== "string") throw new Error("Invalid training session");
     const state = await sessionService.find(id);

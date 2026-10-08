@@ -132,7 +132,7 @@ test("a completed checkpoint request remains saved after worker polling", async 
     );
     assert.match(
       saved.checkpointPath,
-      /[\\/]outputs[\\/]checkpoint[\\/]adapter[\\/]last\.gguf$/,
+      /[\\/]\.internal[\\/]checkpoint[\\/]adapter[\\/]last\.gguf$/,
     );
     await new Promise((resolve) => setTimeout(resolve, 450));
     assert.equal(

@@ -46,7 +46,7 @@ that preserve every answer label; plain-text corpora remain fully trainable.
 | Windows 10 or 11                          | llama.cpp on CUDA, Vulkan, or CPU                                |
 | Debian 12 / Ubuntu 22.04 or newer         | MLX and llama.cpp on CUDA or CPU; llama.cpp also supports Vulkan |
 
-Every completed run publishes both `base-plus-adapter` and a standalone lossless deployment bundle. The base remains quantized and byte-for-byte unchanged, with the exact adapter residual stored beside it.
+Each saved checkpoint publishes the adapter and a standalone fused model. GGUF preserves the base tensor types when merging; the unchanged base shards remain available beside the adapter for continued training.
 
 ## Install
 
@@ -254,7 +254,7 @@ Each run receives its own local date-and-time folder. The session view shows pro
 - Press **Open sessions** or the top-bar **Sessions** button to open the complete sessions folder.
 - Closing the App does not stop training. The detached local worker continues until completion or until **Stop** is pressed.
 
-The session stores its selected settings, progress, checkpoint state, log, and a compact `metrics.csv`. The loss graph reads this history when the App reopens; its Progress, Time, and Steps tabs plot loss against training progress, elapsed time since the first recorded loss, or the trainer's data/iteration counter. The legend identifies each device and saved checkpoint, and the CSV button exports the metrics. Older CSV files without step numbers remain readable; their Steps view is unavailable unless the history is imported from a log that contains those numbers. Training settings stay disabled until the run has stopped, while Auto stop remains adjustable. A paused trainer remains resumable while its detached process is alive. A system restart ends that process, and the adapter checkpoint does not contain the native trainer's optimizer state or data cursor for an exact restart.
+The session stores its selected settings, progress, checkpoint state, log, and a compact `metrics.csv`. The loss graph reads this history when the App reopens; its Progress, Time, and Steps tabs plot loss against training progress, elapsed time since the first recorded loss, or the trainer's data/iteration counter. The legend identifies each device and saved checkpoint, and the CSV button exports the metrics. A stopped GGUF fine-tuning session can resume from its private checkpoint when the trainer saved optimizer state and dataset position under `.internal`.
 
 A completed run contains the same organized output as osAi CLI:
 
@@ -262,17 +262,21 @@ A completed run contains the same organized output as osAi CLI:
 session/
 ├── manifests/
 ├── logs/
-├── outputs/base-plus-adapter/
-└── outputs/merged-model/
+└── outputs/
+    └── gguf/                       or mlx/
+        ├── model/                  unchanged GGUF shards and projector
+        ├── osai_adapter.gguf
+        ├── osai_fusion.json
+        └── merged.gguf             standalone fused model
 ```
 
 Combined runs keep the supervised stage below `stages/fine-tuning/` and place the final aligned adapter and deployment bundle in the parent session’s `outputs/` directory.
 
-After a run completes, choose **Use merged model** to select `outputs/merged-model/` as the next custom model, or **Open outputs** to inspect both the LoRA adapter and merged model. Further training resumes the embedded adapter and publishes a new self-contained merged model.
+Press **Save checkpoint** to choose a folder (default: the session's `outputs/`). The App saves at the next safe training step and reports success after both adapter and merged model are ready. Automatic checkpoints and a safe Stop update the same output. **Model Tools** can export standalone fused weights from an existing osAi session or output folder to another chosen location.
 
-For MLX, the deployment bundle leaves every quantized tensor unchanged and embeds the adapter in `osai_adapter/`. osAi verifies that its next-token logits exactly match the original base-plus-adapter path.
+For MLX, `outputs/mlx/` contains the base model, adapter in `osai_adapter/`, and standalone fused weights in `merged/`.
 
-For GGUF, the bundle keeps the original file or split shards and any multimodal projector unchanged under `model/`, stores the exact adapter as `osai_adapter.gguf`, and records them in `osai_fusion.json`. SHA-256 checks verify every copy. No unified, dequantized, or requantized model is created.
+For GGUF, the bundle keeps the original file or split shards and projector under `model/`, stores the adapter as `osai_adapter.gguf`, and writes fused weights to `merged.gguf`. A split base is unified temporarily for export, then that temporary file is removed. The exporter preserves each base tensor type while applying the adapter.
 
 ## App controls
 

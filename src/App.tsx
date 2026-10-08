@@ -478,6 +478,11 @@ export function App() {
   const [wikiActive, setWikiActive] = useState(false);
   const [dataEditorOpen, setDataEditorOpen] = useState(false);
   const [dataEditorActive, setDataEditorActive] = useState(false);
+  const [modelToolsOpen, setModelToolsOpen] = useState(false);
+  const [modelToolsSource, setModelToolsSource] = useState("");
+  const [modelToolsDestination, setModelToolsDestination] = useState("");
+  const [modelToolsBusy, setModelToolsBusy] = useState(false);
+  const [modelToolsResult, setModelToolsResult] = useState("");
   const [dataEditorSource, setDataEditorSource] = useState("");
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const trainingFormRef = useRef<HTMLFieldSetElement | null>(null);
@@ -902,7 +907,10 @@ export function App() {
   useEffect(() => setNoticeExpanded(false), [notice]);
 
   useEffect(() => {
-    if (!selected || selected.status !== "completed") {
+    if (
+      !selected ||
+      (selected.status !== "completed" && selected.status !== "stopped")
+    ) {
       setSessionArtifacts(null);
       return;
     }
@@ -1306,8 +1314,11 @@ export function App() {
     setNotice("");
     setSessionControl("saving");
     try {
-      await window.osai.saveCheckpoint(id);
-      setNotice("Checkpoint requested. Saving at the next safe training step.");
+      const saved = await window.osai.saveCheckpoint(id);
+      if (!saved) return;
+      setNotice(
+        "Checkpoint requested. Adapter and merged model will be saved at the next safe step.",
+      );
       await refreshSessions();
     } catch (error) {
       setNotice(readableError(error));
@@ -3375,6 +3386,14 @@ export function App() {
               <div className="session-toolbar-actions">
                 <button
                   type="button"
+                  className="quiet-button compact-button wiki-open-button"
+                  onClick={() => setModelToolsOpen(true)}
+                >
+                  <Icon name="tool" />
+                  Model Tools
+                </button>
+                <button
+                  type="button"
                   className={
                     "quiet-button compact-button wiki-open-button " +
                     (dataEditorActive ? "active" : "")
@@ -3664,7 +3683,7 @@ export function App() {
                             : "Waiting for the next safe training step"
                           : selected.checkpointStatus === "failed"
                             ? "Save failed; check the live output"
-                            : `Adapter saved ${friendlyTime(selected.checkpointSavedAt || "")}`}
+                            : `Adapter and merged model saved ${friendlyTime(selected.checkpointSavedAt || "")}`}
                       </strong>
                     </div>
                   )}
@@ -3727,42 +3746,44 @@ export function App() {
                     </div>
                   </div>
                 )}
-                {selected.status === "completed" && sessionArtifacts && (
-                  <div className="session-artifacts">
-                    <span>
-                      {sessionArtifacts.adapterDirectory
-                        ? "LoRA adapter saved"
-                        : "No adapter was published"}
-                      {sessionArtifacts.mergedModel
-                        ? " · Reusable merged model saved"
-                        : ""}
-                    </span>
-                    {sessionArtifacts.mergedModel && (
+                {(selected.status === "completed" ||
+                  selected.status === "stopped") &&
+                  sessionArtifacts && (
+                    <div className="session-artifacts">
+                      <span>
+                        {sessionArtifacts.adapterDirectory
+                          ? "LoRA adapter saved"
+                          : "No adapter was published"}
+                        {sessionArtifacts.mergedModel
+                          ? " · Standalone merged model saved"
+                          : ""}
+                      </span>
+                      {sessionArtifacts.mergedModel && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setForm((current) => ({
+                              ...current,
+                              modelSource: "custom",
+                              customModelFolder: sessionArtifacts.mergedModel!,
+                            }))
+                          }
+                        >
+                          Use merged model
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() =>
-                          setForm((current) => ({
-                            ...current,
-                            modelSource: "custom",
-                            customModelFolder: sessionArtifacts.mergedModel!,
-                          }))
+                          void window.osai
+                            .openSessionArtifacts(selected.id)
+                            .catch((error) => setNotice(readableError(error)))
                         }
                       >
-                        Use merged model
+                        Open outputs
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void window.osai
-                          .openSessionArtifacts(selected.id)
-                          .catch((error) => setNotice(readableError(error)))
-                      }
-                    >
-                      Open outputs
-                    </button>
-                  </div>
-                )}
+                    </div>
+                  )}
                 <div className="training-monitor">
                   <section className="training-monitor-panel">
                     <div className="log-heading">
@@ -3911,6 +3932,20 @@ export function App() {
         <div className="progress-copy" aria-live="polite">
           <Icon name={footerActivity.icon} />
           <span>{footerActivity.message}</span>
+          {calibrationBusy && (
+            <button
+              type="button"
+              className="status-cancel"
+              aria-label="Cancel calibration"
+              title="Cancel calibration"
+              onClick={() => {
+                setCalibrationMessage("Stopping calibration…");
+                void window.osai.cancelAutoCalibration();
+              }}
+            >
+              <Icon name="x" size={16} />
+            </button>
+          )}
         </div>
         <div
           className="status-track"
@@ -3933,6 +3968,120 @@ export function App() {
         </div>
         <span className="status-percent">{footerActivity.label}</span>
       </footer>
+
+      {modelToolsOpen && (
+        <div
+          className="hardware-sheet-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !modelToolsBusy)
+              setModelToolsOpen(false);
+          }}
+        >
+          <aside
+            className="hardware-sheet model-tools-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="model-tools-title"
+          >
+            <header>
+              <div>
+                <h2 id="model-tools-title">Model Tools</h2>
+                <p>
+                  Export standalone weights from a saved base model and adapter.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close Model Tools"
+                disabled={modelToolsBusy}
+                onClick={() => setModelToolsOpen(false)}
+              >
+                <Icon name="x" />
+              </button>
+            </header>
+            <div className="model-tools-fields">
+              <label className="field">
+                <span>Model and adapter folder</span>
+                <div className="model-tools-path">
+                  <input
+                    value={modelToolsSource}
+                    onChange={(event) =>
+                      setModelToolsSource(event.target.value)
+                    }
+                    placeholder="Choose an osAi output or session folder"
+                  />
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    disabled={modelToolsBusy}
+                    onClick={() =>
+                      void window.osai
+                        .chooseDirectory("Choose model and adapter folder")
+                        .then((value) => {
+                          if (value) setModelToolsSource(value);
+                        })
+                    }
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+              <label className="field">
+                <span>Save merged model in</span>
+                <div className="model-tools-path">
+                  <input
+                    value={modelToolsDestination}
+                    onChange={(event) =>
+                      setModelToolsDestination(event.target.value)
+                    }
+                    placeholder="Choose an output folder"
+                  />
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    disabled={modelToolsBusy}
+                    onClick={() =>
+                      void window.osai
+                        .chooseDirectory("Choose merged model save location")
+                        .then((value) => {
+                          if (value) setModelToolsDestination(value);
+                        })
+                    }
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={
+                  modelToolsBusy || !modelToolsSource || !modelToolsDestination
+                }
+                onClick={() => {
+                  setModelToolsBusy(true);
+                  setModelToolsResult("");
+                  void window.osai
+                    .exportMergedModel(modelToolsSource, modelToolsDestination)
+                    .then((value) =>
+                      setModelToolsResult(`Merged model saved: ${value}`),
+                    )
+                    .catch((error) => setModelToolsResult(readableError(error)))
+                    .finally(() => setModelToolsBusy(false));
+                }}
+              >
+                <Icon name={modelToolsBusy ? "loader" : "download"} />
+                {modelToolsBusy
+                  ? "Exporting merged weights…"
+                  : "Export merged model"}
+              </button>
+              {modelToolsResult && <p role="status">{modelToolsResult}</p>}
+            </div>
+          </aside>
+        </div>
+      )}
 
       {selected && errorLogSessionId === selected.id && (
         <div

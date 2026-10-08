@@ -2717,7 +2717,8 @@ select:disabled {
 .status-track {
   position: relative;
   overflow: hidden;
-  height: 5px;
+  height: 10px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: var(--panel2);
 }
@@ -3122,7 +3123,7 @@ select:disabled {
 
 .statusbar {
   min-width: 0;
-  height: 52px;
+  min-height: 58px;
   display: grid;
   grid-template-columns: minmax(250px, 1fr) minmax(170px, 0.7fr) 70px;
   align-items: center;
@@ -3136,6 +3137,7 @@ select:disabled {
   min-width: 0;
   gap: 8px;
   color: var(--muted);
+  font-size: 13px;
 }
 
 .progress-copy .icon {
@@ -3151,8 +3153,50 @@ select:disabled {
 .status-percent {
   color: var(--muted);
   font-family: "Fira Code", ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 13px;
   text-align: right;
+}
+
+.status-cancel {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: 6px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--panel2);
+  cursor: pointer;
+}
+
+.status-cancel:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.model-tools-fields {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+}
+.model-tools-path {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.model-tools-path input {
+  flex: 1;
+  min-width: 0;
+}
+.model-tools-path button {
+  flex: 0 0 auto;
+}
+.model-tools-fields > p {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .hardware-sheet-backdrop {

@@ -397,7 +397,8 @@ export type OsAiBridge = {
   startTraining(value: TrainingRequest): Promise<SessionState>;
   pauseTraining(id: string): Promise<SessionState>;
   resumeTraining(id: string): Promise<SessionState>;
-  saveCheckpoint(id: string): Promise<SessionState>;
+  saveCheckpoint(id: string): Promise<SessionState | null>;
+  exportMergedModel(source: string, destination: string): Promise<string>;
   setAutoStop(id: string, enabled: boolean): Promise<SessionState>;
   stopTraining(id: string): Promise<SessionState>;
   restartSession(id: string, value: TrainingRequest): Promise<SessionState>;

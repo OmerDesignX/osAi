@@ -2,6 +2,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+function saveFixtureCheckpoint(request, generation, contents) {
+  const root = path.dirname(request);
+  const output = path.join(
+    root,
+    ".internal",
+    "checkpoint",
+    "adapter",
+    "last.gguf",
+  );
+  const model = path.join(root, "outputs", "gguf");
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.mkdirSync(model, { recursive: true });
+  fs.writeFileSync(output, contents);
+  process.stdout.write(
+    `osai: checkpoint saved path=${output} generation=${generation}\n`,
+  );
+  fs.writeFileSync(path.join(model, "osai_adapter.gguf"), contents);
+  fs.writeFileSync(path.join(model, "merged.gguf"), `merged ${contents}`);
+  process.stdout.write(
+    `osai: checkpoint model ready path=${model} generation=${generation}\n`,
+  );
+}
+
 // The real CLI exits after saving at a record boundary when Stop is requested.
 // Make the detached-worker fixture obey the same control protocol.
 const stopRequest = process.env.OSAI_STOP_REQUEST;
@@ -52,18 +75,7 @@ if (
       : "";
     if (generation && generation !== savedGeneration && !stalled) {
       savedGeneration = generation;
-      const output = path.join(
-        path.dirname(request),
-        "outputs",
-        "checkpoint",
-        "adapter",
-        "last.gguf",
-      );
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.writeFileSync(output, `adapter at ${step}`);
-      process.stdout.write(
-        `osai: checkpoint saved path=${output} generation=${generation}\n`,
-      );
+      saveFixtureCheckpoint(request, generation, `adapter at ${step}`);
     }
     if (step === 80 && !stalled) {
       clearInterval(timer);
@@ -104,18 +116,7 @@ if (
       : "";
     if (generation && generation !== savedGeneration) {
       savedGeneration = generation;
-      const output = path.join(
-        path.dirname(request),
-        "outputs",
-        "checkpoint",
-        "adapter",
-        "last.gguf",
-      );
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.writeFileSync(output, `adapter at ${step}`);
-      process.stdout.write(
-        `osai: checkpoint saved path=${output} generation=${generation}\n`,
-      );
+      saveFixtureCheckpoint(request, generation, `adapter at ${step}`);
     }
     if (step === total) {
       clearInterval(timer);
@@ -125,18 +126,7 @@ if (
 } else if (process.argv.includes("--checkpoint")) {
   const request = process.env.OSAI_CHECKPOINT_REQUEST;
   const generation = fs.readFileSync(request, "utf8").trim();
-  const output = path.join(
-    path.dirname(request),
-    "outputs",
-    "checkpoint",
-    "adapter",
-    "last.gguf",
-  );
-  fs.mkdirSync(path.dirname(output), { recursive: true });
-  fs.writeFileSync(output, "adapter");
-  process.stdout.write(
-    `osai: checkpoint saved path=${output} generation=${generation}\n`,
-  );
+  saveFixtureCheckpoint(request, generation, "adapter");
   setTimeout(() => process.exit(0), 900);
 } else if (process.argv.includes("--fail")) {
   process.stderr.write("osai: unsupported dataset schema at train.jsonl:1\n");

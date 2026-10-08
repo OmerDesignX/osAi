@@ -159,11 +159,51 @@ function consumeLine(raw: string) {
     if (
       !relative.startsWith("..") &&
       !path.isAbsolute(relative) &&
-      /[\\/]outputs[\\/]checkpoint[\\/]/i.test(savedPath)
+      /[\\/](?:outputs|\.internal)[\\/]checkpoint[\\/]/i.test(savedPath)
     ) {
+      state.checkpointPath = savedPath;
+      state.checkpointStatus = "requested";
+      state.message = "Adapter saved; merging model weights";
+      void scheduleStateWrite(true);
+    }
+    return;
+  }
+  const checkpointModel =
+    /osai: checkpoint model ready path=(.+?)(?: generation=([^\s]+))?$/i.exec(
+      line,
+    );
+  if (checkpointModel) {
+    const modelPath = path.resolve(checkpointModel[1]);
+    const merged = path.join(modelPath, "merged.gguf");
+    const adapter = path.join(modelPath, "osai_adapter.gguf");
+    const mlxMerged = path.join(
+      modelPath,
+      "merged",
+      "model.safetensors.index.json",
+    );
+    const mlxAdapter = path.join(
+      modelPath,
+      "osai_adapter",
+      "adapters.safetensors",
+    );
+    void Promise.all([
+      fs.stat(merged).catch(() => null),
+      fs.stat(adapter).catch(() => null),
+      fs.stat(mlxMerged).catch(() => null),
+      fs.stat(mlxAdapter).catch(() => null),
+    ]).then(([ggufModel, ggufAdapter, mlxModel, mlxAdapterFile]) => {
+      if (
+        (!ggufModel?.size || !ggufAdapter?.size) &&
+        (!mlxModel?.size || !mlxAdapterFile?.size)
+      ) {
+        state.checkpointStatus = "failed";
+        state.error = `Checkpoint output is missing an adapter or merged model: ${modelPath}`;
+        void scheduleStateWrite(true);
+        return;
+      }
+      state.checkpointModelPath = modelPath;
       state.checkpointStatus = "saved";
       state.checkpointSavedAt = new Date().toISOString();
-      state.checkpointPath = savedPath;
       recordMetric(
         {
           time: state.checkpointSavedAt,
@@ -179,21 +219,17 @@ function consumeLine(raw: string) {
         true,
       );
       void scheduleStateWrite(true);
-      if (pauseGeneration && checkpoint[2] === pauseGeneration)
-        void completePause(savedPath);
-      if (autoStopGeneration && checkpoint[2] === autoStopGeneration)
-        void completeAutomaticStop(savedPath);
-    }
+      if (state.checkpointPath && checkpointModel[2] === pauseGeneration)
+        void completePause(state.checkpointPath);
+      if (state.checkpointPath && checkpointModel[2] === autoStopGeneration)
+        void completeAutomaticStop(state.checkpointPath);
+    });
     return;
   }
-  const checkpointModel = /osai: checkpoint model ready path=(.+)$/i.exec(line);
-  if (checkpointModel) {
-    const modelPath = path.resolve(checkpointModel[1]);
-    const relative = path.relative(job.sessionDirectory, modelPath);
-    if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
-      state.checkpointModelPath = modelPath;
-      void scheduleStateWrite(true);
-    }
+  if (/osai: checkpoint model failed\b/i.test(line)) {
+    state.checkpointStatus = "failed";
+    state.error = line.slice(0, 1000);
+    void scheduleStateWrite(true);
     return;
   }
   if (/osai: checkpoint failed\b/i.test(line)) {
@@ -601,7 +637,7 @@ async function recoverStalledAutomaticStop() {
     if (
       !relative.startsWith("..") &&
       !path.isAbsolute(relative) &&
-      /[\\/]outputs[\\/]checkpoint[\\/]/i.test(resolved) &&
+      /[\\/](?:outputs|\.internal)[\\/]checkpoint[\\/]/i.test(resolved) &&
       snapshot?.isFile() &&
       snapshot.size > 0
     ) {
@@ -840,6 +876,13 @@ async function finish(
   if (status === "stopped") {
     const snapshot = path.join(
       job.sessionDirectory,
+      ".internal",
+      "checkpoint",
+      "adapter",
+      "last.gguf.resume",
+    );
+    const legacySnapshot = path.join(
+      job.sessionDirectory,
       "outputs",
       "checkpoint",
       "adapter",
@@ -847,6 +890,8 @@ async function finish(
     );
     if ((await fs.stat(snapshot).catch(() => null))?.isFile()) {
       state.resumeCheckpointPath = snapshot;
+    } else if ((await fs.stat(legacySnapshot).catch(() => null))?.isFile()) {
+      state.resumeCheckpointPath = legacySnapshot;
     }
   }
   state.message =
