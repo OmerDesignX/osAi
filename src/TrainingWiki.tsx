@@ -775,7 +775,10 @@ const wikiEntries: WikiEntry[] = [
             <h3>GGUF / llama.cpp</h3>
             <p>
               Native quantized sequence backward updates a GGUF LoRA adapter.
-              Auto uses SGD. Metal, CUDA, Vulkan, and CPU depend on the host.
+              Auto uses SGD. Metal, CUDA, Vulkan, and CPU depend on the host. On
+              a mixed NVIDIA and dedicated AMD system, Auto can shard one
+              training step across CUDA and AMD Vulkan devices. Integrated
+              graphics are excluded.
             </p>
           </div>
         </div>

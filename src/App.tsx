@@ -3102,7 +3102,7 @@ export function App() {
                         <span>Device order</span>
                         <input
                           value={form.devices}
-                          placeholder="Example: CUDA0, CUDA1, CUDA2"
+                          placeholder="Example: CUDA0, CUDA1, Vulkan2"
                           spellCheck={false}
                           onChange={(event) =>
                             setForm({ ...form, devices: event.target.value })
