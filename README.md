@@ -55,7 +55,7 @@ Each saved checkpoint publishes the adapter and a standalone fused model. GGUF p
 3. The training workspace opens when setup and the native build finish. The setup screen shows download and compiler progress. Each package includes CMake and Ninja for its platform. Windows setup detects Microsoft C++ Build Tools or downloads a verified portable C++ toolchain. macOS and Linux need their native C/C++ tools for local compilation.
 4. If an existing installation is not found automatically, open **Settings**, select its executable under **osAi backend**, then press **Save and check**.
 
-The native llama.cpp build selects Metal on macOS, CUDA when available, Vulkan when CUDA is unavailable, and CPU when no GPU toolchain is available. An attempted GPU build that fails is reported during setup. Windows setup can download a verified Vulkan SDK into its private build cache for a Vulkan install if the runtime is present but the SDK is missing. Apple silicon with macOS 14 or newer can also use MLX.
+The native llama.cpp build selects Metal on macOS, CUDA when available, Vulkan when CUDA is unavailable, and CPU when no GPU toolchain is available. An attempted GPU build that fails is reported during setup. Windows setup reuses a complete installed Vulkan SDK, including one from an older osAi installation. If none exists, it downloads a verified SDK to one shared cache outside versioned installations. Apple silicon with macOS 14 or newer can also use MLX.
 
 ## Start a training session
 
