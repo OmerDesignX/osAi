@@ -40,6 +40,19 @@ test("setup failure bounds dialog output while retaining recent diagnostics", ()
   assert.ok(message.includes("compiler failure at the end"));
 });
 
+test("disk exhaustion is reported ahead of cascading compiler diagnostics", () => {
+  const log =
+    "No space left on device\n" +
+    "ggml.h: identifier int32_t is undefined\n".repeat(1000);
+  const message = backendSetupFailureMessage(log, 2, "last-install.log");
+  assert.ok(message.includes("ran out of disk space"));
+  assert.ok(
+    message.indexOf("ran out of disk space") <
+      message.indexOf("identifier int32_t"),
+  );
+  assert.ok(message.endsWith("Full setup log: last-install.log"));
+});
+
 const testPython = [process.env.OSAI_TEST_PYTHON, "python3", "python"].find(
   (candidate) =>
     candidate &&

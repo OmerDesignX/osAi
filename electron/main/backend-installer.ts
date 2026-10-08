@@ -250,8 +250,15 @@ export function backendSetupFailureMessage(
   logPath: string,
 ) {
   const details = log.trim().slice(-16_000);
+  const diskFull =
+    /No space left on device|There is not enough space on the disk|ENOSPC/i.test(
+      log,
+    );
   return [
     `osAi CLI setup failed (exit code ${code}).`,
+    diskFull
+      ? "The build ran out of disk space while compiling. Free space on the drive containing the osAi installation, then retry. Later compiler errors may be caused by this failure."
+      : "",
     details,
     `Full setup log: ${logPath}`,
   ]
@@ -450,6 +457,17 @@ export class BackendInstaller {
           "Installing osAi CLI and compiling llama.cpp for this computer",
         percent: 70,
       });
+      const installFilesystem = await fs.statfs(installRoot);
+      const installFreeBytes =
+        installFilesystem.bavail * installFilesystem.bsize;
+      const buildJobs = Math.max(
+        1,
+        Math.min(
+          installFreeBytes < 4 * 1024 ** 3 ? 1 : 4,
+          Math.floor(os.totalmem() / (8 * 1024 ** 3)),
+          Math.floor(os.availableParallelism() / 2),
+        ),
+      );
       const setup = await runCommand(
         python.executable,
         [
@@ -459,16 +477,7 @@ export class BackendInstaller {
           venv,
           "--skip-mlx-build",
           "--jobs",
-          String(
-            Math.max(
-              1,
-              Math.min(
-                4,
-                Math.floor(os.totalmem() / (8 * 1024 ** 3)),
-                Math.floor(os.availableParallelism() / 2),
-              ),
-            ),
-          ),
+          String(buildJobs),
         ],
         {
           cwd: source,
