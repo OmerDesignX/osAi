@@ -28,7 +28,7 @@ function saveFixtureCheckpoint(request, generation, contents) {
 // The real CLI exits after saving at a record boundary when Stop is requested.
 // Make the detached-worker fixture obey the same control protocol.
 const stopRequest = process.env.OSAI_STOP_REQUEST;
-if (stopRequest) {
+if (stopRequest && !process.argv.includes("--non-exact-stop")) {
   const stopPoll = setInterval(() => {
     if (fs.existsSync(stopRequest)) {
       clearInterval(stopPoll);

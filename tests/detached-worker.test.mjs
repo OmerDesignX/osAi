@@ -638,6 +638,76 @@ test("a detached training worker stops only after an explicit stop request", asy
   }
 });
 
+test("a non-exact trainer saves adapter and merged model before stopping", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "osai-worker-mlx-stop-"),
+  );
+  const worker = path.resolve("dist-electron/main/training-worker.js");
+  const backend = path.resolve("tests/fixtures/fake-backend.mjs");
+  const statePath = path.join(root, "state.json");
+  const jobPath = path.join(root, "job.json");
+  const stopPath = path.join(root, "stop.request");
+  const checkpointRequestPath = path.join(root, "checkpoint.request");
+  const id = "77777777-7777-4777-8777-777777777777";
+  const now = new Date().toISOString();
+  await fs.writeFile(
+    statePath,
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      name: "mlx-stop-test",
+      status: "queued",
+      phase: "preparing",
+      progress: 0,
+      indeterminate: true,
+      message: "queued",
+      createdAt: now,
+      sessionDirectory: root,
+      logPath: path.join(root, "training.log"),
+      command: "node fake-backend.mjs --non-exact-stop",
+    }),
+  );
+  await fs.writeFile(
+    jobPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      executable: process.execPath,
+      args: [backend, "--pause-checkpoint-long", "--non-exact-stop"],
+      sessionDirectory: root,
+      statePath,
+      logPath: path.join(root, "training.log"),
+      stopPath,
+      checkpointRequestPath,
+      stage: "alignment",
+      iterations: 1,
+      alignmentIterations: 1,
+      createdAt: now,
+    }),
+  );
+  const processHandle = spawn(process.execPath, [worker, jobPath], {
+    stdio: "ignore",
+  });
+  try {
+    await waitFor(statePath, (value) => value.status === "running");
+    await fs.writeFile(stopPath, "stop\n");
+    const stopped = await waitFor(
+      statePath,
+      (value) => value.status === "stopped",
+    );
+    assert.equal(stopped.checkpointStatus, "saved");
+    assert.match(stopped.message, /adapter and merged model are ready/i);
+    assert.ok((await fs.stat(stopped.checkpointPath)).size > 0);
+    assert.ok(
+      (await fs.stat(path.join(root, "outputs", "gguf", "merged.gguf"))).size >
+        0,
+    );
+  } finally {
+    processHandle.kill("SIGKILL");
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a checkpoint-paused worker can be stopped cleanly", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-worker-pause-"));
   const worker = path.resolve("dist-electron/main/training-worker.js");

@@ -31,6 +31,7 @@ let legacyStop = false;
 let stopTimer: ReturnType<typeof setTimeout> | null = null;
 let paused = false;
 let pauseGeneration = "";
+let stopGeneration = "";
 let autoStopGeneration = "";
 let autoStopRequestedAt = 0;
 let autoStopped = false;
@@ -223,6 +224,7 @@ function consumeLine(raw: string) {
         void completePause(state.checkpointPath);
       if (state.checkpointPath && checkpointModel[2] === autoStopGeneration)
         void completeAutomaticStop(state.checkpointPath);
+      if (checkpointModel[2] === stopGeneration) void completeStopCheckpoint();
     });
     return;
   }
@@ -619,6 +621,16 @@ async function completeAutomaticStop(savedPath: string) {
   });
 }
 
+async function completeStopCheckpoint() {
+  if (!stopGeneration || !stopping || !child?.pid) return;
+  stopGeneration = "";
+  legacyStop = true;
+  if (stopTimer) clearTimeout(stopTimer);
+  state.message = "Adapter and merged model saved; stopping the trainer";
+  await scheduleStateWrite(true);
+  await killTree();
+}
+
 async function recoverStalledAutomaticStop() {
   if (
     !autoStopGeneration ||
@@ -784,15 +796,33 @@ async function terminateTree() {
       : "Auto stop saved a checkpoint and is stopping training"
     : supportsExactStop()
       ? "Saving an exact resume checkpoint at the next completed record"
-      : "Stopping the training process";
+      : "Saving an adapter and merged model before stopping";
   await scheduleStateWrite(true);
   if (!child?.pid) return;
+  const stoppedWhilePaused =
+    paused &&
+    state.checkpointStatus === "saved" &&
+    Boolean(state.checkpointModelPath);
   if (paused) {
     await setChildPaused(false).catch(() => undefined);
     paused = false;
   }
   await fs.writeFile(job.stopPath, "stop\n", { mode: 0o600 });
   if (!supportsExactStop()) {
+    if (job.checkpointRequestPath && !autoStopped && !stoppedWhilePaused) {
+      stopGeneration = randomUUID();
+      state.checkpointStatus = "requested";
+      const pending = `${job.checkpointRequestPath}.${process.pid}.pending`;
+      await fs.writeFile(pending, `${stopGeneration}\n`, { mode: 0o600 });
+      await fs.rename(pending, job.checkpointRequestPath);
+      stopTimer = setTimeout(
+        () => void forceStopAfterTimeout(),
+        gracefulStopTimeoutMs,
+      );
+      stopTimer.unref();
+      await scheduleStateWrite(true);
+      return;
+    }
     legacyStop = true;
     await killTree();
     return;
@@ -904,7 +934,9 @@ async function finish(
             : "Auto stop saved a checkpoint after sustained rising loss"
           : state.resumeCheckpointPath
             ? "Training stopped; exact resume checkpoint is ready"
-            : "Training stopped by the user"
+            : state.checkpointStatus === "saved" && state.checkpointModelPath
+              ? "Training stopped; adapter and merged model are ready"
+              : "Training stopped by the user"
         : "Training failed; open the log for details";
   if (error) state.error = error.slice(0, 1000);
   await metricWrites.catch(() => undefined);
