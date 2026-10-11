@@ -6,6 +6,7 @@ import {
   validateAutoCalibrationResult,
 } from "../dist-electron/main/auto-calibration.js";
 import { validateAutoBenchmarkResult } from "../dist-electron/main/auto-benchmark.js";
+import { autoBenchmarkArgs } from "../dist-electron/main/auto-benchmark.js";
 import { calibrationKey } from "../dist-electron/calibration-key.js";
 
 const request = {
@@ -182,6 +183,12 @@ test("benchmark accepts a heterogeneous multi-GPU sharding plan", () => {
       () => validateAutoBenchmarkResult(invalid),
       /invalid benchmark settings/,
     );
+});
+
+test("opening the app reuses the hardware benchmark until its fingerprint changes", () => {
+  const args = autoBenchmarkArgs(request);
+  assert.equal(args[0], "auto-benchmark");
+  assert.equal(args.includes("--refresh"), false);
 });
 
 test("background inventory refresh does not invalidate the approved request", () => {

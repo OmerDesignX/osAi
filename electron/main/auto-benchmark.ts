@@ -13,7 +13,11 @@ const benchmarkTimeoutMs = 60 * 60 * 1_000;
 let active: ChildProcess | null = null;
 
 export function autoBenchmarkArgs(input: TrainingRequest) {
-  const args = ["auto-benchmark", "--refresh"];
+  // The CLI cache is keyed by the physical devices, available-memory class,
+  // CPU, model files and native backend. Let that fingerprint decide when a
+  // fresh probe is necessary instead of remeasuring unchanged hardware at
+  // every app launch.
+  const args = ["auto-benchmark"];
   if (input.modelSource === "official") {
     if (!["v1", "v2"].includes(input.modelVersion))
       throw new Error("Invalid model version");
