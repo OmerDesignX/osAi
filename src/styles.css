@@ -811,6 +811,44 @@ p {
   color: var(--accent);
 }
 
+.model-tiers button:disabled {
+  cursor: not-allowed;
+  color: color-mix(in srgb, var(--muted) 48%, transparent);
+  background: color-mix(in srgb, var(--control-fill) 56%, transparent);
+  box-shadow: none;
+}
+
+.model-capacity-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.model-capacity-notice .icon {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.model-capacity-notice.warning {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+}
+
+.model-capacity-notice.warning .icon {
+  color: var(--danger);
+}
+
 .field-row {
   display: grid;
   gap: 10px;

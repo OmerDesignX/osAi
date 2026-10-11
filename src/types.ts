@@ -110,6 +110,8 @@ export type AutoBenchmarkResult = {
   engine: TrainingRequest["engine"];
   accelerator: TrainingRequest["accelerator"];
   devices: string[];
+  tensor_split: number[];
+  main_gpu: number;
   elapsed_seconds: number;
   cached: boolean;
 };
@@ -127,6 +129,12 @@ export type AutoCalibrationResult = Omit<
   last_loss: number;
   improvement_percent: number;
   device_speeds?: number[];
+};
+
+export type AutoDeviceInventory = {
+  accelerator: string;
+  devices: string[];
+  free_bytes: Record<string, number>;
 };
 
 export type SessionArtifacts = {
@@ -366,7 +374,7 @@ export type OsAiBridge = {
   onCalibrationProgress(callback: (message: string) => void): () => void;
   autoDevices(
     accelerator: TrainingRequest["accelerator"],
-  ): Promise<{ accelerator: string; devices: string[] }>;
+  ): Promise<AutoDeviceInventory>;
   startTraining(value: TrainingRequest): Promise<SessionState>;
   pauseTraining(id: string): Promise<SessionState>;
   resumeTraining(id: string): Promise<SessionState>;

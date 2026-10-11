@@ -75,6 +75,15 @@ export function validateAutoCalibrationResult(
     !result ||
     !result.settings ||
     !Array.isArray(result.devices) ||
+    !Array.isArray(result.tensor_split) ||
+    result.tensor_split.some(
+      (weight) => !Number.isFinite(weight) || weight <= 0,
+    ) ||
+    (result.tensor_split.length > 0 &&
+      result.tensor_split.length !== result.devices.length) ||
+    !Number.isInteger(result.main_gpu) ||
+    result.main_gpu < 0 ||
+    (result.devices.length > 0 && result.main_gpu >= result.devices.length) ||
     !Number.isInteger(result.settings.max_seq_length) ||
     result.settings.max_seq_length <= 0 ||
     (result.required_context != null &&

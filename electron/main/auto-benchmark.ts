@@ -1,7 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import type { AutoBenchmarkResult, TrainingRequest } from "../types.js";
+import type {
+  AutoBenchmarkResult,
+  AutoDeviceInventory,
+  TrainingRequest,
+} from "../types.js";
 import { backendRuntimeEnvironment } from "./backend-source.js";
 
 const outputLimit = 64 * 1024;
@@ -66,6 +70,28 @@ export function autoBenchmarkArgs(input: TrainingRequest) {
   return args;
 }
 
+export function validateAutoBenchmarkResult(
+  value: unknown,
+): AutoBenchmarkResult {
+  const result = value as AutoBenchmarkResult | null;
+  if (
+    !result?.settings ||
+    !Number.isInteger(result.settings.max_seq_length) ||
+    !Array.isArray(result.devices) ||
+    !Array.isArray(result.tensor_split) ||
+    result.tensor_split.some(
+      (weight) => !Number.isFinite(weight) || weight <= 0,
+    ) ||
+    (result.tensor_split.length > 0 &&
+      result.tensor_split.length !== result.devices.length) ||
+    !Number.isInteger(result.main_gpu) ||
+    result.main_gpu < 0 ||
+    (result.devices.length > 0 && result.main_gpu >= result.devices.length)
+  )
+    throw new Error("osAi CLI returned invalid benchmark settings");
+  return result;
+}
+
 export async function runAutoBenchmark(
   executable: string,
   input: TrainingRequest,
@@ -114,12 +140,7 @@ export async function runAutoBenchmark(
         return;
       }
       try {
-        const result = JSON.parse(stdout) as AutoBenchmarkResult;
-        if (
-          !result.settings ||
-          !Number.isInteger(result.settings.max_seq_length)
-        )
-          throw new Error("osAi CLI returned invalid benchmark settings");
+        const result = validateAutoBenchmarkResult(JSON.parse(stdout));
         finish(undefined, result);
       } catch (error) {
         finish(error instanceof Error ? error : new Error(String(error)));
@@ -131,7 +152,7 @@ export async function runAutoBenchmark(
 export async function readAutoDevices(
   executable: string,
   accelerator: TrainingRequest["accelerator"],
-): Promise<{ accelerator: string; devices: string[] }> {
+): Promise<AutoDeviceInventory> {
   if (!["auto", "metal", "mps", "cuda", "vulkan", "cpu"].includes(accelerator))
     return Promise.reject(new Error("Invalid accelerator"));
   const environment = await backendRuntimeEnvironment(executable);
@@ -166,10 +187,18 @@ export async function readAutoDevices(
         const result = JSON.parse(output) as {
           accelerator: string;
           devices: string[];
+          free_bytes?: Record<string, number>;
         };
-        if (!Array.isArray(result.devices))
+        if (
+          !Array.isArray(result.devices) ||
+          (result.free_bytes !== undefined &&
+            (typeof result.free_bytes !== "object" ||
+              Object.values(result.free_bytes).some(
+                (value) => !Number.isFinite(value) || value <= 0,
+              )))
+        )
           throw new Error("Invalid GPU inventory");
-        resolve(result);
+        resolve({ ...result, free_bytes: result.free_bytes ?? {} });
       } catch (failure) {
         reject(failure);
       }

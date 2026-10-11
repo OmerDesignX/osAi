@@ -5,6 +5,7 @@ import {
   autoCalibrationArgs,
   validateAutoCalibrationResult,
 } from "../dist-electron/main/auto-calibration.js";
+import { validateAutoBenchmarkResult } from "../dist-electron/main/auto-benchmark.js";
 import { calibrationKey } from "../dist-electron/calibration-key.js";
 
 const request = {
@@ -132,6 +133,8 @@ test("a small verified pilot decline is ready for training", () => {
   const pilot = {
     settings: { max_seq_length: 1024 },
     devices: ["CUDA0", "CUDA1"],
+    tensor_split: [3, 7],
+    main_gpu: 1,
     device_speeds: [2.1, 1],
     learning_rate: 1e-5,
     first_loss: 3.703472,
@@ -152,10 +155,32 @@ test("a small verified pilot decline is ready for training", () => {
     { ...pilot, required_context: 2048 },
     { ...pilot, device_speeds: [1] },
     { ...pilot, device_speeds: [1, Number.NaN] },
+    { ...pilot, tensor_split: [1] },
+    { ...pilot, tensor_split: [1, Number.NaN] },
+    { ...pilot, main_gpu: 2 },
   ])
     assert.throws(
       () => validateAutoCalibrationResult(invalid),
       /invalid calibration measurements/,
+    );
+});
+
+test("benchmark accepts a heterogeneous multi-GPU sharding plan", () => {
+  const benchmark = {
+    settings: { max_seq_length: 1024 },
+    devices: ["MTL0", "MTL1"],
+    tensor_split: [3584, 7372.8],
+    main_gpu: 1,
+  };
+  assert.equal(validateAutoBenchmarkResult(benchmark), benchmark);
+  for (const invalid of [
+    { ...benchmark, tensor_split: [1] },
+    { ...benchmark, tensor_split: [1, 0] },
+    { ...benchmark, main_gpu: 2 },
+  ])
+    assert.throws(
+      () => validateAutoBenchmarkResult(invalid),
+      /invalid benchmark settings/,
     );
 });
 

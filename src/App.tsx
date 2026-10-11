@@ -9,10 +9,12 @@ import {
 import { createPortal } from "react-dom";
 import feather from "feather-icons";
 import { calibrationKey } from "../electron/calibration-key.js";
+import { modelFitsShardedGpuMemory } from "../electron/model-capacity.js";
 import { displayedSessionProgress } from "../electron/session-progress.js";
 import type {
   AlignmentType,
   AutoCalibrationResult,
+  AutoDeviceInventory,
   AppUpdateStatus,
   BackendInstallStatus,
   BackendStatus,
@@ -448,7 +450,13 @@ export function App() {
   );
   const [customModelBytes, setCustomModelBytes] = useState<number | null>(null);
   const [benchmarkDevices, setBenchmarkDevices] = useState<string[]>([]);
+  const [benchmarkPlan, setBenchmarkPlan] = useState<{
+    tensorSplit: number[];
+    mainGpu: number;
+  } | null>(null);
   const [deviceSignature, setDeviceSignature] = useState<string | null>(null);
+  const [deviceInventory, setDeviceInventory] =
+    useState<AutoDeviceInventory | null>(null);
   const [sessionArtifacts, setSessionArtifacts] =
     useState<SessionArtifacts | null>(null);
   const [noticeExpanded, setNoticeExpanded] = useState(false);
@@ -517,6 +525,40 @@ export function App() {
     [hardware, form.engine, form.tier, form.modelVersion],
   );
   const hardwarePreset = benchmarkPreset || fallbackPreset;
+  const officialTiers: TrainingRequest["tier"][] =
+    form.modelVersion === "v2"
+      ? ["xsmall", "small", "medium", "large"]
+      : ["small", "medium", "large"];
+  const requestedDevices = form.devices
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const discoveredCapacityDevices = requestedDevices.length
+    ? requestedDevices
+    : (deviceInventory?.devices ?? []);
+  const capacityDevices =
+    form.multiGpu === "off"
+      ? discoveredCapacityDevices.slice(0, 1)
+      : discoveredCapacityDevices;
+  const freeGpuBytes =
+    capacityDevices.length > 0 &&
+    capacityDevices.every(
+      (device) => (deviceInventory?.free_bytes[device] ?? 0) > 0,
+    )
+      ? capacityDevices.map((device) => deviceInventory!.free_bytes[device])
+      : [];
+  const modelFitByTier = Object.fromEntries(
+    officialTiers.map((tier) => [
+      tier,
+      modelFitsShardedGpuMemory(
+        estimatedModelBytes(hardware, form.engine, tier, form.modelVersion),
+        freeGpuBytes,
+      ),
+    ]),
+  ) as Partial<Record<TrainingRequest["tier"], boolean | null>>;
+  const noOfficialModelFits =
+    freeGpuBytes.length > 0 &&
+    officialTiers.every((tier) => modelFitByTier[tier] === false);
   const guidanceBatchChoices = fittedChoices(
     hardwarePreset.batchSize,
     [1, 2, 4, 8, 16],
@@ -804,8 +846,9 @@ export function App() {
   ]);
 
   useEffect(() => {
-    if (!form.autoSettings || !backend?.available || active || starting) {
+    if (!backend?.available || active || starting) {
       setDeviceSignature(null);
+      setDeviceInventory(null);
       return;
     }
     let current = true;
@@ -813,7 +856,15 @@ export function App() {
       void window.osai
         .autoDevices(form.accelerator)
         .then((inventory) => {
-          if (current) setDeviceSignature(JSON.stringify(inventory));
+          if (current) {
+            setDeviceInventory(inventory);
+            setDeviceSignature(
+              JSON.stringify({
+                accelerator: inventory.accelerator,
+                devices: inventory.devices,
+              }),
+            );
+          }
         })
         .catch((error) => {
           if (current) setNotice(readableError(error));
@@ -826,12 +877,27 @@ export function App() {
       current = false;
       window.clearInterval(interval);
     };
+  }, [backend?.available, form.accelerator, active?.id, starting]);
+
+  useEffect(() => {
+    if (form.modelSource !== "official" || modelFitByTier[form.tier] !== false)
+      return;
+    const fallback = officialTiers.find(
+      (tier) => modelFitByTier[tier] !== false,
+    );
+    if (fallback)
+      setForm((current) =>
+        current.tier === fallback ? current : { ...current, tier: fallback },
+      );
   }, [
-    backend?.available,
-    form.autoSettings,
-    form.accelerator,
-    active?.id,
-    starting,
+    deviceSignature,
+    form.engine,
+    form.modelSource,
+    form.modelVersion,
+    form.tier,
+    hardware.architecture,
+    hardware.platform,
+    hardware.physicalMemoryBytes,
   ]);
 
   useEffect(() => {
@@ -847,10 +913,13 @@ export function App() {
       setBenchmarkBusy(false);
       return;
     }
+    if (form.modelSource === "official" && modelFitByTier[form.tier] === false)
+      return;
     if (form.modelSource === "custom" && !form.customModelFolder) return;
     let current = true;
     setBenchmarkPreset(null);
     setBenchmarkModelBytes(null);
+    setBenchmarkPlan(null);
     setBenchmarkBusy(true);
     const timer = window.setTimeout(() => {
       void window.osai
@@ -870,6 +939,10 @@ export function App() {
           });
           setBenchmarkModelBytes(settings.model_size_bytes);
           setBenchmarkDevices(result.devices);
+          setBenchmarkPlan({
+            tensorSplit: result.tensor_split,
+            mainGpu: result.main_gpu,
+          });
           void window.osai.hardwareInfo().then(setHardware);
         })
         .catch((error) => {
@@ -1125,6 +1198,10 @@ export function App() {
       });
       setBenchmarkModelBytes(result.settings.model_size_bytes);
       setBenchmarkDevices(result.devices);
+      setBenchmarkPlan({
+        tensorSplit: result.tensor_split,
+        mainGpu: result.main_gpu,
+      });
       setLearningPace(null);
       setForm((current) => ({
         ...current,
@@ -1870,14 +1947,17 @@ export function App() {
                     <div
                       className={`model-tiers${form.modelVersion === "v2" ? " four" : ""}`}
                     >
-                      {(form.modelVersion === "v2"
-                        ? ["xsmall", "small", "medium", "large"]
-                        : ["small", "medium", "large"]
-                      ).map((tier) => (
+                      {officialTiers.map((tier) => (
                         <button
                           type="button"
                           key={tier}
                           className={form.tier === tier ? "active" : ""}
+                          disabled={modelFitByTier[tier] === false}
+                          title={
+                            modelFitByTier[tier] === false
+                              ? "This model needs more combined GPU memory than the detected cards currently provide"
+                              : undefined
+                          }
                           onClick={() =>
                             setForm({
                               ...form,
@@ -1891,6 +1971,39 @@ export function App() {
                         </button>
                       ))}
                     </div>
+                    {noOfficialModelFits ? (
+                      <div
+                        className="model-capacity-notice warning"
+                        role="status"
+                      >
+                        <Icon name="alert-circle" />
+                        <span>
+                          None of this model generation fits the combined free
+                          GPU memory right now. Close GPU-heavy apps, choose the
+                          other osCode generation, or use CPU training.
+                        </span>
+                      </div>
+                    ) : benchmarkDevices.length > 1 ? (
+                      <div className="model-capacity-notice" role="status">
+                        <Icon name="layers" />
+                        <span>
+                          This model will be sharded across{" "}
+                          {benchmarkDevices.join(" + ")}.
+                          {benchmarkPlan &&
+                          benchmarkDevices[benchmarkPlan.mainGpu]
+                            ? ` ${benchmarkDevices[benchmarkPlan.mainGpu]} has the most available memory and will hold shared buffers.`
+                            : " osAi will place shared buffers on the card with the most available memory."}
+                        </span>
+                      </div>
+                    ) : capacityDevices.length > 1 ? (
+                      <div className="model-capacity-notice" role="status">
+                        <Icon name="layers" />
+                        <span>
+                          osAi detected {capacityDevices.length} GPUs and will
+                          test a memory-weighted model shard across all of them.
+                        </span>
+                      </div>
+                    ) : null}
                     {(form.engine === "llama.cpp" ||
                       (form.engine === "auto" &&
                         !(

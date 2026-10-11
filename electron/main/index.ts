@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import type {
   AutoCalibrationResult,
+  AutoDeviceInventory,
   Preferences,
   TrainingRequest,
 } from "../types.js";
@@ -50,6 +51,13 @@ let approvedCalibration: {
   deviceSignature: string;
   result: AutoCalibrationResult;
 } | null = null;
+
+function deviceIdentity(inventory: AutoDeviceInventory) {
+  return JSON.stringify({
+    accelerator: inventory.accelerator,
+    devices: inventory.devices,
+  });
+}
 
 async function moveSessionToTrash(directory: string) {
   let cleanupError: unknown;
@@ -346,14 +354,14 @@ function registerIpc() {
         throw new Error(
           "Training data changed during calibration; run calibration again",
         );
-      if (JSON.stringify(devicesAfter) !== JSON.stringify(devicesBefore))
+      if (deviceIdentity(devicesAfter) !== deviceIdentity(devicesBefore))
         throw new Error(
           "Available hardware changed during calibration; run calibration again",
         );
       approvedCalibration = {
         key: calibrationKey(input),
         datasetSignature: after.signature,
-        deviceSignature: JSON.stringify(devicesAfter),
+        deviceSignature: deviceIdentity(devicesAfter),
         result,
       };
       return result;
@@ -390,7 +398,7 @@ function registerIpc() {
         approvedCalibration.datasetSignature !==
           (await datasetTrainingSummary(input.fineTuneData)).signature ||
         approvedCalibration.deviceSignature !==
-          JSON.stringify(
+          deviceIdentity(
             await readAutoDevices(status.executable, input.accelerator),
           ) ||
         !input.learningRate ||
@@ -414,6 +422,8 @@ function registerIpc() {
             ggufThreads: approvedCalibration.result.settings.gguf_threads,
             targetModules: approvedCalibration.result.settings.target_modules,
             devices: approvedCalibration.result.devices.join(", "),
+            tensorSplit: approvedCalibration.result.tensor_split.join(", "),
+            mainGpu: approvedCalibration.result.main_gpu,
             deviceSpeeds: approvedCalibration.result.device_speeds ?? [],
           }
         : input;
