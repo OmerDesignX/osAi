@@ -3626,6 +3626,170 @@ select:disabled {
   line-height: 1.5;
 }
 
+.cluster-node-workspace {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 42px;
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      rgba(129, 204, 239, 0.09),
+      transparent 34%
+    ),
+    var(--bg);
+}
+
+.cluster-node-card {
+  width: min(560px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  padding: 42px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.cluster-node-card > svg {
+  color: var(--accent);
+}
+
+.cluster-node-card h1,
+.cluster-node-card p {
+  margin: 0;
+}
+
+.cluster-role-tag {
+  color: var(--accent);
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cluster-node-facts {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  border-block: 1px solid var(--line);
+}
+
+.cluster-node-facts span {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  color: var(--muted);
+}
+
+.cluster-node-facts span + span {
+  border-left: 1px solid var(--line);
+}
+
+.cluster-node-facts b {
+  color: var(--text);
+  font-size: 1.45rem;
+}
+
+.cluster-cancel {
+  justify-self: center;
+}
+
+.cluster-mode-choice {
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 12px;
+}
+
+.cluster-setting-field {
+  margin-top: 14px;
+}
+
+.cluster-status-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.cluster-status-line > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.cluster-status-line > span.ready {
+  background: #80d9ae;
+  box-shadow: 0 0 0 4px rgba(128, 217, 174, 0.1);
+}
+
+.cluster-graph {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg);
+}
+
+.cluster-self,
+.cluster-peer {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.cluster-self {
+  grid-template-columns: 24px 1fr auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.cluster-self > svg,
+.cluster-peer > svg {
+  color: var(--accent);
+}
+
+.cluster-self small,
+.cluster-peer small {
+  color: var(--muted);
+}
+
+.cluster-peer > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.cluster-peer small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cluster-link {
+  position: absolute;
+  left: 23px;
+  top: -11px;
+  width: 1px;
+  height: 11px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.cluster-empty {
+  margin: 4px 2px 0;
+}
+
 .bridge-error {
   width: 100%;
   height: 100%;

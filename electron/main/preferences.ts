@@ -12,6 +12,9 @@ export const defaultPreferences: Preferences = {
   autoUpdateEnabled: false,
   sessionsRoot: defaultSessionsRoot,
   sessionRoots: [defaultSessionsRoot],
+  clusterMode: "off",
+  clusterName: os.hostname().slice(0, 80),
+  clusterSecret: "",
 };
 
 function directory(value: unknown) {
@@ -42,6 +45,18 @@ function validate(value: unknown): Preferences {
     autoUpdateEnabled: input.autoUpdateEnabled === true,
     sessionsRoot,
     sessionRoots: [...new Set([sessionsRoot, ...sessionRoots])].slice(0, 32),
+    clusterMode:
+      input.clusterMode === "node" || input.clusterMode === "master"
+        ? input.clusterMode
+        : "off",
+    clusterName:
+      typeof input.clusterName === "string" && input.clusterName.trim()
+        ? input.clusterName.trim().slice(0, 80)
+        : os.hostname().slice(0, 80),
+    clusterSecret:
+      typeof input.clusterSecret === "string"
+        ? input.clusterSecret.trim().slice(0, 256)
+        : "",
   };
 }
 

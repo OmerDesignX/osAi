@@ -36,6 +36,8 @@ import { modelTrainingSummary } from "./model-summary.js";
 import { hardwareSnapshot } from "./hardware-snapshot.js";
 import { AppUpdateService } from "./updater.js";
 import { migrateLegacyV1Models } from "./model-migration.js";
+import { ClusterService } from "./cluster-service.js";
+import { ClusterTrainingCoordinator } from "./cluster-training.js";
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
@@ -44,6 +46,8 @@ let mainWindow: BrowserWindow | null = null;
 let sessionService: SessionService;
 let updateService: AppUpdateService;
 let backendInstaller: BackendInstaller;
+let clusterService: ClusterService;
+let clusterTraining: ClusterTrainingCoordinator;
 let pendingMacInstaller = "";
 let approvedCalibration: {
   key: string;
@@ -226,13 +230,18 @@ function registerIpc() {
   ipcMain.handle("system:hardware-snapshot", () => hardwareSnapshot());
   ipcMain.handle("preferences:get", () => preferences());
   ipcMain.handle("preferences:set", async (_event, value: unknown) => {
+    const previous = await preferences();
     const saved = await writePreferences(
       userDataPath("preferences.json"),
       value,
     );
     await updateService.setEnabled(saved.autoUpdateEnabled);
+    if (previous.clusterMode === "node" && saved.clusterMode !== "node")
+      await clusterTraining.cancelNodeJobs();
+    await clusterService.update(saved);
     return saved;
   });
+  ipcMain.handle("cluster:status", () => clusterService.getStatus());
   ipcMain.handle("dialog:choose-directory", async (_event, title: unknown) => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title:
@@ -391,6 +400,8 @@ function registerIpc() {
       !(await backendInstaller.isCurrent(status.executable))
     )
       throw new Error("Install the current osAi CLI from main before training");
+    if ((await preferences()).clusterMode === "master")
+      return clusterTraining.start(input, status.executable);
     if (input.autoSettings && input.stage !== "alignment") {
       if (
         !approvedCalibration ||
@@ -524,6 +535,7 @@ function registerIpc() {
     const outputs = path.join(state.sessionDirectory, "outputs");
     const gguf = path.join(outputs, "gguf");
     const mlx = path.join(outputs, "mlx");
+    const cluster = path.join(outputs, "cluster");
     const legacy = path.join(outputs, "merged-model");
     const ggufReady = Boolean(
       (
@@ -535,6 +547,12 @@ function registerIpc() {
         await fs.stat(path.join(mlx, "merged", "config.json")).catch(() => null)
       )?.isFile(),
     );
+    const clusterReady = Boolean(
+      (
+        await fs.stat(path.join(cluster, "adapter.gguf")).catch(() => null)
+      )?.isFile(),
+    );
+    if (clusterReady) return { mergedModel: null, adapterDirectory: cluster };
     const adapter = ggufReady ? gguf : mlxReady ? mlx : null;
     return {
       mergedModel: ggufReady
@@ -656,6 +674,10 @@ app.whenReady().then(async () => {
     path.join(app.getAppPath(), "dist-electron", "main", "training-worker.js"),
     preferences,
   );
+  clusterService = new ClusterService(userDataPath("cluster"), (status) =>
+    send("cluster:status-changed", status),
+  );
+  await clusterService.initialize(await preferences());
   await migrateModelsIfIdle();
   backendInstaller = new BackendInstaller(
     userDataPath("backend", "installations"),
@@ -673,6 +695,13 @@ app.whenReady().then(async () => {
         backendExecutable: executable,
       } satisfies Preferences);
     },
+  );
+  clusterTraining = new ClusterTrainingCoordinator(
+    clusterService,
+    sessionService,
+    userDataPath("cluster", "training"),
+    preferences,
+    (executable) => backendInstaller.isCurrent(executable),
   );
   updateService = new AppUpdateService(
     userDataPath("updates"),
@@ -725,6 +754,7 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   cancelAutoCalibration();
+  clusterService?.dispose();
   updateService?.dispose();
   if (process.platform === "darwin" && pendingMacInstaller) {
     const installer = pendingMacInstaller;

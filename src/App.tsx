@@ -18,6 +18,7 @@ import type {
   AppUpdateStatus,
   BackendInstallStatus,
   BackendStatus,
+  ClusterStatus,
   HardwareInfo,
   HardwareSnapshot,
   LoraTargetModule,
@@ -321,7 +322,26 @@ const fallbackPreferences: Preferences = {
   autoUpdateEnabled: false,
   sessionsRoot: "",
   sessionRoots: [],
+  clusterMode: "off",
+  clusterName: "This computer",
+  clusterSecret: "",
 };
+
+const fallbackCluster: ClusterStatus = {
+  mode: "off",
+  ready: false,
+  message: "Cluster mode is off",
+  selfId: "",
+  peers: [],
+};
+
+function generatedClusterSecret() {
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
 
 const fallbackUpdate: AppUpdateStatus = {
   state: "disabled",
@@ -421,6 +441,8 @@ export function App() {
   const [datasetSummaryError, setDatasetSummaryError] = useState("");
   const [datasetSummaryBusy, setDatasetSummaryBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cluster, setCluster] = useState<ClusterStatus>(fallbackCluster);
+  const [clusterKeyVisible, setClusterKeyVisible] = useState(false);
   const [sessions, setSessions] = useState<SessionState[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [log, setLog] = useState("");
@@ -547,7 +569,7 @@ export function App() {
     )
       ? capacityDevices.map((device) => deviceInventory!.free_bytes[device])
       : [];
-  const modelFitByTier = Object.fromEntries(
+  const localModelFitByTier = Object.fromEntries(
     officialTiers.map((tier) => [
       tier,
       modelFitsShardedGpuMemory(
@@ -555,6 +577,35 @@ export function App() {
         freeGpuBytes,
       ),
     ]),
+  ) as Partial<Record<TrainingRequest["tier"], boolean | null>>;
+  const clusterNodes = cluster.peers.filter((peer) => peer.role === "node");
+  const modelFitByTier = Object.fromEntries(
+    officialTiers.map((tier) => {
+      const local = localModelFitByTier[tier] ?? null;
+      if (preferences.clusterMode !== "master" || !clusterNodes.length)
+        return [tier, local];
+      const size = estimatedModelBytes(
+        hardware,
+        "llama.cpp",
+        tier,
+        form.modelVersion,
+      );
+      const clusterLocal = modelFitsShardedGpuMemory(size, freeGpuBytes);
+      const nodeFits = clusterNodes.map((peer) =>
+        modelFitsShardedGpuMemory(
+          size,
+          peer.gpuMemoryBytes.map((bytes) => Math.floor(bytes * 0.9)),
+        ),
+      );
+      return [
+        tier,
+        clusterLocal === false || nodeFits.includes(false)
+          ? false
+          : clusterLocal === true && nodeFits.every((value) => value === true)
+            ? true
+            : null,
+      ];
+    }),
   ) as Partial<Record<TrainingRequest["tier"], boolean | null>>;
   const noOfficialModelFits =
     freeGpuBytes.length > 0 &&
@@ -806,6 +857,7 @@ export function App() {
       window.osai.backendInstallStatus().then(setBackendInstall),
       window.osai.appUpdateStatus().then(setUpdate),
       window.osai.hardwareInfo().then(setHardware),
+      window.osai.clusterStatus().then(setCluster),
     ]).catch((error) => setNotice(readableError(error)));
     const removeUpdateListener = window.osai.onAppUpdateStatus(setUpdate);
     const removeBackendInstallListener = window.osai.onBackendInstallStatus(
@@ -818,11 +870,13 @@ export function App() {
         }
       },
     );
+    const removeClusterListener = window.osai.onClusterStatus(setCluster);
     const interval = window.setInterval(() => void refreshSessions(), 1_200);
     return () => {
       window.clearInterval(interval);
       removeUpdateListener();
       removeBackendInstallListener();
+      removeClusterListener();
     };
   }, [refreshBackend, refreshSessions]);
 
@@ -1795,7 +1849,44 @@ export function App() {
         </nav>
       </header>
 
-      {backendReady ? (
+      {backendReady && preferences.clusterMode === "node" ? (
+        <main className="cluster-node-workspace">
+          <section className="cluster-node-card">
+            <span className="cluster-role-tag">Cluster node</span>
+            <Icon name="share-2" size={34} />
+            <h1>{preferences.clusterName}</h1>
+            <p>{cluster.message}</p>
+            <div className="cluster-node-facts">
+              <span>
+                <b>
+                  {
+                    cluster.peers.filter((peer) => peer.role === "master")
+                      .length
+                  }
+                </b>
+                Master
+              </span>
+              <span>
+                <b>{cluster.peers.length}</b>
+                Visible machines
+              </span>
+            </div>
+            <p className="field-hint">
+              Training controls stay locked while this computer is offered to
+              the cluster. Discovery is authenticated and limited to this LAN.
+            </p>
+            <button
+              type="button"
+              className="quiet-button cluster-cancel"
+              onClick={() =>
+                void savePreferences({ ...preferences, clusterMode: "off" })
+              }
+            >
+              <Icon name="x" /> Cancel node mode
+            </button>
+          </section>
+        </main>
+      ) : backendReady ? (
         <main className="workspace">
           <aside className="training-panel">
             <header className="panel-header">
@@ -1979,8 +2070,23 @@ export function App() {
                         <Icon name="alert-circle" />
                         <span>
                           None of this model generation fits the combined free
-                          GPU memory right now. Close GPU-heavy apps, choose the
-                          other osCode generation, or use CPU training.
+                          GPU memory right now
+                          {preferences.clusterMode === "master"
+                            ? " on every connected cluster machine"
+                            : ""}
+                          . Close GPU-heavy apps, choose the other osCode
+                          generation, or use CPU training.
+                        </span>
+                      </div>
+                    ) : preferences.clusterMode === "master" &&
+                      clusterNodes.length ? (
+                      <div className="model-capacity-notice" role="status">
+                        <Icon name="share-2" />
+                        <span>
+                          {clusterNodes.length + 1} machines will train separate
+                          data shards. Each machine will shard this model across
+                          all compatible local GPUs, then the master will
+                          combine their adapters.
                         </span>
                       </div>
                     ) : benchmarkDevices.length > 1 ? (
@@ -4637,6 +4743,143 @@ export function App() {
 
             <section>
               <div className="section-heading">
+                <h3>Cluster mode</h3>
+              </div>
+              <p className="field-hint">
+                Encrypted LAN-only cluster work uses official osCode models and
+                text fine-tuning data. Every machine benchmarks and shards the
+                model across its own GPUs; the master combines compatible
+                adapters after all machines finish. The key is never broadcast.
+              </p>
+              <div className="theme-choice cluster-mode-choice">
+                {(
+                  [
+                    ["off", "circle", "Off"],
+                    ["node", "server", "Node"],
+                    ["master", "share-2", "Master"],
+                  ] as const
+                ).map(([value, icon, label]) => (
+                  <button
+                    key={value}
+                    className={
+                      preferences.clusterMode === value ? "active" : ""
+                    }
+                    onClick={() => {
+                      const clusterSecret =
+                        value !== "off" && preferences.clusterSecret.length < 12
+                          ? generatedClusterSecret()
+                          : preferences.clusterSecret;
+                      void savePreferences({
+                        ...preferences,
+                        clusterMode: value,
+                        clusterSecret,
+                      });
+                    }}
+                  >
+                    <Icon name={icon} /> {label}
+                  </button>
+                ))}
+              </div>
+              <label className="field cluster-setting-field">
+                <span>Machine name</span>
+                <input
+                  value={preferences.clusterName}
+                  maxLength={80}
+                  onChange={(event) =>
+                    setPreferences({
+                      ...preferences,
+                      clusterName: event.target.value,
+                    })
+                  }
+                  onBlur={() => void savePreferences(preferences)}
+                />
+              </label>
+              <label className="field cluster-setting-field">
+                <span>Private cluster key</span>
+                <input
+                  type={clusterKeyVisible ? "text" : "password"}
+                  value={preferences.clusterSecret}
+                  minLength={12}
+                  maxLength={256}
+                  autoComplete="new-password"
+                  placeholder="Use the same key on every machine"
+                  onChange={(event) =>
+                    setPreferences({
+                      ...preferences,
+                      clusterSecret: event.target.value,
+                    })
+                  }
+                  onBlur={() => void savePreferences(preferences)}
+                />
+              </label>
+              <div className="button-row cluster-key-actions">
+                <button
+                  type="button"
+                  className="quiet-button"
+                  onClick={() => setClusterKeyVisible((visible) => !visible)}
+                >
+                  <Icon name={clusterKeyVisible ? "eye-off" : "eye"} />
+                  {clusterKeyVisible ? "Hide key" : "Show key"}
+                </button>
+                <button
+                  type="button"
+                  className="quiet-button"
+                  onClick={() => {
+                    const clusterSecret = generatedClusterSecret();
+                    setPreferences({ ...preferences, clusterSecret });
+                    void savePreferences({ ...preferences, clusterSecret });
+                  }}
+                >
+                  <Icon name="refresh-cw" /> New key
+                </button>
+              </div>
+              <div className="cluster-status-line">
+                <span className={cluster.ready ? "ready" : ""} />
+                {cluster.message}
+              </div>
+              {preferences.clusterMode !== "off" && (
+                <div
+                  className="cluster-graph"
+                  aria-label="LAN cluster machines"
+                >
+                  <div className="cluster-self">
+                    <Icon
+                      name={
+                        preferences.clusterMode === "master" ? "cpu" : "server"
+                      }
+                    />
+                    <b>{preferences.clusterName}</b>
+                    <small>{preferences.clusterMode}</small>
+                  </div>
+                  {cluster.peers.map((peer) => (
+                    <div className="cluster-peer" key={peer.id}>
+                      <span className="cluster-link" aria-hidden="true" />
+                      <Icon name={peer.role === "master" ? "cpu" : "server"} />
+                      <div>
+                        <b>{peer.name}</b>
+                        <small>
+                          {peer.platform} · {peer.architecture} ·{" "}
+                          {memoryLabel(peer.memoryBytes)}
+                        </small>
+                        <small>
+                          {peer.gpuNames.length
+                            ? peer.gpuNames.join(" + ")
+                            : "GPU details unavailable"}
+                        </small>
+                      </div>
+                    </div>
+                  ))}
+                  {!cluster.peers.length && (
+                    <p className="field-hint cluster-empty">
+                      Waiting for another osAi app with the same cluster key.
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+
+            <section>
+              <div className="section-heading">
                 <h3>App updates</h3>
               </div>
               <label className="toggle-row">
@@ -4677,9 +4920,9 @@ export function App() {
             </section>
 
             <p className="settings-footnote">
-              Training, rollout generation and alignment run locally. Network
-              access is used only for initial setup, app updates and optional
-              model downloads.
+              Training, rollout generation and alignment run locally. Cluster
+              discovery uses authenticated, one-hop LAN multicast only. Internet
+              access is used for setup, updates and optional model downloads.
             </p>
           </aside>
         </div>

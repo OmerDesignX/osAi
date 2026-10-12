@@ -31,6 +31,31 @@ export type Preferences = {
   autoUpdateEnabled: boolean;
   sessionsRoot: string;
   sessionRoots: string[];
+  clusterMode: "off" | "node" | "master";
+  clusterName: string;
+  clusterSecret: string;
+};
+
+export type ClusterPeer = {
+  id: string;
+  name: string;
+  role: "node" | "master";
+  address: string;
+  platform: string;
+  architecture: string;
+  memoryBytes: number;
+  gpuNames: string[];
+  gpuMemoryBytes: number[];
+  dataPort: number;
+  lastSeenAt: string;
+};
+
+export type ClusterStatus = {
+  mode: "off" | "node" | "master";
+  ready: boolean;
+  message: string;
+  selfId: string;
+  peers: ClusterPeer[];
 };
 
 export type TrainingRequest = {
@@ -383,6 +408,8 @@ export type OsAiBridge = {
   hardwareSnapshot(): Promise<HardwareSnapshot>;
   loadPreferences(): Promise<Preferences>;
   savePreferences(value: Preferences): Promise<Preferences>;
+  clusterStatus(): Promise<ClusterStatus>;
+  onClusterStatus(callback: (status: ClusterStatus) => void): () => void;
   chooseDirectory(title: string): Promise<string>;
   chooseDataset(title: string): Promise<string>;
   chooseFile(title: string): Promise<string>;

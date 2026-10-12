@@ -19,6 +19,38 @@ test("defaults sessions to an osAi folder in the user home directory", async () 
     );
     assert.equal(preferences.sessionsRoot, defaultSessionsRoot);
     assert.deepEqual(preferences.sessionRoots, [defaultSessionsRoot]);
+    assert.equal(preferences.clusterMode, "off");
+    assert.equal(preferences.clusterSecret, "");
+    assert.ok(preferences.clusterName.length > 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validates and bounds private cluster preferences", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "osai-preferences-"));
+  const file = path.join(root, "preferences.json");
+  try {
+    const saved = await writePreferences(file, {
+      version: 1,
+      sessionsRoot: defaultSessionsRoot,
+      clusterMode: "master",
+      clusterName: `  ${"machine".repeat(20)}  `,
+      clusterSecret: `  ${"s".repeat(300)}  `,
+    });
+    assert.equal(saved.clusterMode, "master");
+    assert.equal(saved.clusterName.length, 80);
+    assert.equal(saved.clusterSecret.length, 256);
+
+    const rejected = await writePreferences(file, {
+      version: 1,
+      sessionsRoot: defaultSessionsRoot,
+      clusterMode: "public-internet",
+      clusterName: "",
+      clusterSecret: 42,
+    });
+    assert.equal(rejected.clusterMode, "off");
+    assert.equal(rejected.clusterSecret, "");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

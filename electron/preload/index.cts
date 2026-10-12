@@ -14,6 +14,15 @@ const bridge: OsAiBridge = {
   loadPreferences: () => ipcRenderer.invoke("preferences:get"),
   savePreferences: (value: Preferences) =>
     ipcRenderer.invoke("preferences:set", value),
+  clusterStatus: () => ipcRenderer.invoke("cluster:status"),
+  onClusterStatus: (callback) => {
+    const listener = (
+      _event: unknown,
+      status: Parameters<typeof callback>[0],
+    ) => callback(status);
+    ipcRenderer.on("cluster:status-changed", listener);
+    return () => ipcRenderer.removeListener("cluster:status-changed", listener);
+  },
   chooseDirectory: (title: string) =>
     ipcRenderer.invoke("dialog:choose-directory", title),
   chooseDataset: (title: string) =>

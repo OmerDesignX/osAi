@@ -1323,7 +1323,19 @@ export class SessionService {
     );
     await Promise.all(
       valid.map(async (state) => {
-        if (!activeStatuses.has(state.status) || running(state.workerPid))
+        const clusterController = Number(
+          await fs
+            .readFile(
+              path.join(state.sessionDirectory, ".cluster-controller"),
+              "utf8",
+            )
+            .catch(() => "0"),
+        );
+        if (
+          !activeStatuses.has(state.status) ||
+          running(state.workerPid) ||
+          running(clusterController)
+        )
           return;
         if (Date.now() - Date.parse(state.createdAt) < 15_000) return;
         state.status = "failed";
