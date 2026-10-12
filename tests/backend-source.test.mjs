@@ -48,3 +48,14 @@ test("the app packages a CLI download manifest without backend binaries", async 
     false,
   );
 });
+
+test("macOS leaves physical Metal device selection to the training backend", async () => {
+  const root = path.resolve(import.meta.dirname, "..");
+  const app = JSON.parse(await fs.readFile(path.join(root, "package.json")));
+
+  assert.equal(
+    app.build.mac.extendInfo.NSSupportsAutomaticGraphicsSwitching,
+    true,
+  );
+  assert.equal("GPUSelectionPolicy" in app.build.mac.extendInfo, false);
+});

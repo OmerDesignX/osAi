@@ -1,6 +1,6 @@
 {
   "name": "osai-app",
-  "version": "0.1.75",
+  "version": "0.1.76",
   "description": "A local desktop training controller for osAi",
   "main": "dist-electron/main/index.js",
   "author": "osAi contributors",
@@ -91,8 +91,7 @@
       ],
       "category": "public.app-category.developer-tools",
       "extendInfo": {
-        "NSSupportsAutomaticGraphicsSwitching": true,
-        "GPUSelectionPolicy": "preferRemovable"
+        "NSSupportsAutomaticGraphicsSwitching": true
       }
     },
     "win": {
