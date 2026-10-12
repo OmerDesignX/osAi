@@ -166,6 +166,7 @@ export class ClusterService {
   private selfId = "";
   private generation = 0;
   private servers: Server[] = [];
+  private discoveryInterfaces: string[] = [];
   private requestHandler: RequestHandler | null = null;
   private usedNonces = new Set<string>();
   private networkError = "";
@@ -311,6 +312,7 @@ export class ClusterService {
       }
     }
     this.socket = null;
+    this.discoveryInterfaces = [];
   }
 
   private startSocket() {
@@ -327,9 +329,22 @@ export class ClusterService {
     socket.bind(discoveryPort, () => {
       if (this.socket !== socket) return;
       try {
-        socket.addMembership(multicastAddress);
+        const joined: string[] = [];
+        for (const address of privateInterfaceAddresses()) {
+          try {
+            socket.addMembership(multicastAddress, address);
+            joined.push(address);
+          } catch {
+            // An inactive adapter must not prevent discovery on the others.
+          }
+        }
+        if (!joined.length)
+          throw new Error(
+            "No private multicast-capable LAN interface is available",
+          );
+        this.discoveryInterfaces = joined;
         socket.setMulticastTTL(1);
-        socket.setMulticastLoopback(false);
+        socket.setMulticastLoopback(true);
       } catch (error) {
         this.networkError = `LAN multicast is unavailable: ${
           error instanceof Error ? error.message : String(error)
@@ -369,11 +384,22 @@ export class ClusterService {
       ...payload,
       signature: signature(preferences.clusterSecret, payload),
     };
-    this.socket.send(
-      Buffer.from(JSON.stringify(signed)),
-      discoveryPort,
-      multicastAddress,
-    );
+    const message = Buffer.from(JSON.stringify(signed));
+    let sent = false;
+    let lastError = "";
+    for (const address of this.discoveryInterfaces) {
+      try {
+        this.socket.setMulticastInterface(address);
+        this.socket.send(message, discoveryPort, multicastAddress);
+        sent = true;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (!sent) {
+      this.networkError = `LAN multicast send failed: ${lastError}`;
+      this.emit();
+    }
   }
 
   private receive(message: Buffer, remote: RemoteInfo) {

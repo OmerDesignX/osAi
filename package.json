@@ -1,6 +1,6 @@
 {
   "name": "osai-app",
-  "version": "0.1.74",
+  "version": "0.1.75",
   "description": "A local desktop training controller for osAi",
   "main": "dist-electron/main/index.js",
   "author": "osAi contributors",
@@ -27,15 +27,14 @@
     "format:check": "prettier --check . --ignore-unknown --end-of-line auto",
     "preview": "vite preview"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "@fontsource/fira-code": "^5.1.1",
     "@fontsource/manrope": "^5.1.1",
     "@fontsource/playfair-display": "^5.1.1",
     "feather-icons": "^4.29.2",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
-  },
-  "devDependencies": {
+    "react-dom": "^19.1.1",
     "@types/feather-icons": "^4.29.4",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.3",

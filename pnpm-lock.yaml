@@ -7,7 +7,7 @@ settings:
 importers:
 
   .:
-    dependencies:
+    devDependencies:
       '@fontsource/fira-code':
         specifier: ^5.1.1
         version: 5.3.0
@@ -17,16 +17,6 @@ importers:
       '@fontsource/playfair-display':
         specifier: ^5.1.1
         version: 5.3.0
-      feather-icons:
-        specifier: ^4.29.2
-        version: 4.29.2
-      react:
-        specifier: ^19.1.1
-        version: 19.2.8
-      react-dom:
-        specifier: ^19.1.1
-        version: 19.2.8(react@19.2.8)
-    devDependencies:
       '@types/feather-icons':
         specifier: ^4.29.4
         version: 4.29.4
@@ -54,9 +44,18 @@ importers:
       electron-builder:
         specifier: ^26.0.12
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1)
+      feather-icons:
+        specifier: ^4.29.2
+        version: 4.29.2
       prettier:
         specifier: ^3.9.6
         version: 3.9.6
+      react:
+        specifier: ^19.1.1
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.1.1
+        version: 19.2.8(react@19.2.8)
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -3109,11 +3108,11 @@ snapshots:
 
   node-abi@4.35.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-api-version@0.2.1:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-gyp@12.4.0:
     dependencies:
@@ -3122,7 +3121,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.5
       tar: 7.5.22
       tinyglobby: 0.2.17
       undici: 6.28.1
