@@ -44,12 +44,20 @@ test("GPU inventory retains free and total memory by native device ID", () => {
       devices: ["MTL0", "MTL1"],
       free_bytes: { MTL0: 3 * 1024 ** 3, MTL1: 6 * 1024 ** 3 },
       total_bytes: { MTL0: 4 * 1024 ** 3, MTL1: 8 * 1024 ** 3 },
+      labels: {
+        MTL0: "AMD Radeon RX 580",
+        MTL1: "AMD Radeon RX Vega 64",
+      },
     }),
     {
       accelerator: "metal",
       devices: ["MTL0", "MTL1"],
       free_bytes: { MTL0: 3 * 1024 ** 3, MTL1: 6 * 1024 ** 3 },
       total_bytes: { MTL0: 4 * 1024 ** 3, MTL1: 8 * 1024 ** 3 },
+      labels: {
+        MTL0: "AMD Radeon RX 580",
+        MTL1: "AMD Radeon RX Vega 64",
+      },
     },
   );
 });

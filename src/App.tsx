@@ -11,6 +11,10 @@ import feather from "feather-icons";
 import { calibrationKey } from "../electron/calibration-key.js";
 import { modelFitsShardedGpuMemory } from "../electron/model-capacity.js";
 import { displayedSessionProgress } from "../electron/session-progress.js";
+import {
+  matchNativeGpuDevices,
+  nativeGpuLabel,
+} from "../electron/gpu-labels.js";
 import type {
   AlignmentType,
   AutoCalibrationResult,
@@ -562,6 +566,16 @@ export function App() {
     form.multiGpu === "off"
       ? discoveredCapacityDevices.slice(0, 1)
       : discoveredCapacityDevices;
+  const deviceLabels = deviceInventory?.labels ?? {};
+  const labelledBenchmarkDevices = benchmarkDevices.map((device) =>
+    nativeGpuLabel(device, deviceLabels),
+  );
+  const hardwareNativeDevices = hardwareSnapshot
+    ? matchNativeGpuDevices(
+        hardwareSnapshot.gpus.map((gpu) => gpu.name),
+        deviceLabels,
+      )
+    : [];
   const freeGpuBytes =
     capacityDevices.length > 0 &&
     capacityDevices.every(
@@ -1791,7 +1805,7 @@ export function App() {
                     `Rank ${hardwarePreset.rank}`,
                     `Microbatch ${hardwarePreset.ggufBatchSize}`,
                     benchmarkDevices.length
-                      ? benchmarkDevices.join(" + ")
+                      ? labelledBenchmarkDevices.join(" + ")
                       : "CPU",
                   ]
               ).map((item, index) => (
@@ -2099,10 +2113,10 @@ export function App() {
                         <Icon name="layers" />
                         <span>
                           This model will be sharded across{" "}
-                          {benchmarkDevices.join(" + ")}.
+                          {labelledBenchmarkDevices.join(" + ")}.
                           {benchmarkPlan &&
                           benchmarkDevices[benchmarkPlan.mainGpu]
-                            ? ` ${benchmarkDevices[benchmarkPlan.mainGpu]} has the largest physical memory capacity and will hold shared buffers.`
+                            ? ` ${nativeGpuLabel(benchmarkDevices[benchmarkPlan.mainGpu], deviceLabels)} (${memoryLabel(deviceInventory?.total_bytes[benchmarkDevices[benchmarkPlan.mainGpu]] ?? null)} physical VRAM) has the largest physical memory capacity and will hold shared buffers.`
                             : " osAi will place shared buffers on the card with the largest reported memory capacity."}
                         </span>
                       </div>
@@ -2764,7 +2778,7 @@ export function App() {
                         {form.autoSettings
                           ? benchmarkBusy
                             ? "Running local inference to fit training settings to this hardware…"
-                            : `${phaseLabel(hardwarePreset.profile)} profile selected${benchmarkDevices.length ? ` on ${benchmarkDevices.join(", ")}` : ""}. The recommended values are visible below; turn fitting off to edit them.`
+                            : `${phaseLabel(hardwarePreset.profile)} profile selected${labelledBenchmarkDevices.length ? ` on ${labelledBenchmarkDevices.join(", ")}` : ""}. The recommended values are visible below; turn fitting off to edit them.`
                           : "Custom settings are active. Reset restores the recommended hardware profile."}
                       </span>
                     </div>
@@ -4431,12 +4445,17 @@ export function App() {
                   GPUs · {hardwareSnapshot.gpus.length}
                 </div>
                 {hardwareSnapshot.gpus.length ? (
-                  hardwareSnapshot.gpus.map((gpu) => (
+                  hardwareSnapshot.gpus.map((gpu, index) => (
                     <section className="hardware-card" key={gpu.id}>
                       <div className="hardware-card-title">
                         <Icon name="monitor" />
                         <strong>{gpu.name}</strong>
-                        <span>{gpu.backend}</span>
+                        <span>
+                          {gpu.backend}
+                          {hardwareNativeDevices[index]
+                            ? ` · ${hardwareNativeDevices[index]}`
+                            : ""}
+                        </span>
                       </div>
                       <dl>
                         <div>

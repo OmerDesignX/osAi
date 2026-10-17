@@ -21,6 +21,7 @@
   "include": [
     "src",
     "electron/calibration-key.ts",
+    "electron/gpu-labels.ts",
     "electron/model-capacity.ts",
     "electron/session-progress.ts",
     "electron/types.ts"

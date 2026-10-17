@@ -18,6 +18,7 @@ import type {
   TrainingRequest,
 } from "../types.js";
 import { calibrationKey } from "../calibration-key.js";
+import { gpuInventoryIdentity } from "../gpu-labels.js";
 import { BackendInstaller } from "./backend-installer.js";
 import { readAutoDevices, runAutoBenchmark } from "./auto-benchmark.js";
 import {
@@ -57,10 +58,7 @@ let approvedCalibration: {
 } | null = null;
 
 function deviceIdentity(inventory: AutoDeviceInventory) {
-  return JSON.stringify({
-    accelerator: inventory.accelerator,
-    devices: inventory.devices,
-  });
+  return gpuInventoryIdentity(inventory);
 }
 
 async function moveSessionToTrash(directory: string) {

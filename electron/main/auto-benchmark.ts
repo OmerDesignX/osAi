@@ -109,12 +109,20 @@ export function validateAutoDeviceInventory(
         (amount) =>
           typeof amount === "number" && Number.isFinite(amount) && amount > 0,
       ));
+  const validLabelMap = (labels: unknown) =>
+    labels === undefined ||
+    (typeof labels === "object" &&
+      labels !== null &&
+      Object.values(labels).every(
+        (label) => typeof label === "string" && label.trim().length > 0,
+      ));
   if (
     typeof result?.accelerator !== "string" ||
     !Array.isArray(result.devices) ||
     result.devices.some((device) => typeof device !== "string" || !device) ||
     !validMemoryMap(result.free_bytes) ||
-    !validMemoryMap(result.total_bytes)
+    !validMemoryMap(result.total_bytes) ||
+    !validLabelMap(result.labels)
   )
     throw new Error("Invalid GPU inventory");
   return {
@@ -122,6 +130,7 @@ export function validateAutoDeviceInventory(
     devices: result.devices,
     free_bytes: result.free_bytes ?? {},
     total_bytes: result.total_bytes ?? {},
+    labels: result.labels ?? {},
   };
 }
 

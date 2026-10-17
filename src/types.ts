@@ -161,6 +161,7 @@ export type AutoDeviceInventory = {
   devices: string[];
   free_bytes: Record<string, number>;
   total_bytes: Record<string, number>;
+  labels: Record<string, string>;
 };
 
 export type SessionArtifacts = {
