@@ -906,7 +906,10 @@ export function App() {
       return;
     }
     let current = true;
+    let discovering = false;
     const discover = () => {
+      if (discovering) return;
+      discovering = true;
       void window.osai
         .autoDevices(form.accelerator)
         .then((inventory) => {
@@ -922,11 +925,14 @@ export function App() {
         })
         .catch((error) => {
           if (current) setNotice(readableError(error));
+        })
+        .finally(() => {
+          discovering = false;
         });
     };
     setDeviceSignature(null);
     discover();
-    const interval = window.setInterval(discover, 15_000);
+    const interval = window.setInterval(discover, 120_000);
     return () => {
       current = false;
       window.clearInterval(interval);

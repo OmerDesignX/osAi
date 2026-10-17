@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
+import { autoDeviceDiscoveryTimeoutMs } from "../dist-electron/main/auto-benchmark.js";
 import { trustedBackendArchiveUrl } from "../dist-electron/main/backend-installer.js";
 
 test("backend release downloads accept only the pinned GitHub archive host", () => {
@@ -58,4 +59,8 @@ test("macOS leaves physical Metal device selection to the training backend", asy
     true,
   );
   assert.equal("GPUSelectionPolicy" in app.build.mac.extendInfo, false);
+});
+
+test("slow Intel Metal discovery is not killed during shader startup", () => {
+  assert.ok(autoDeviceDiscoveryTimeoutMs >= 90_000);
 });

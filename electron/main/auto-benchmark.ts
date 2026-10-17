@@ -10,6 +10,7 @@ import { backendRuntimeEnvironment } from "./backend-source.js";
 
 const outputLimit = 64 * 1024;
 const benchmarkTimeoutMs = 60 * 60 * 1_000;
+export const autoDeviceDiscoveryTimeoutMs = 120_000;
 let active: ChildProcess | null = null;
 
 export function autoBenchmarkArgs(input: TrainingRequest) {
@@ -173,7 +174,11 @@ export async function readAutoDevices(
     );
     let output = "";
     let error = "";
-    const timer = setTimeout(() => child.kill(), 15_000);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, autoDeviceDiscoveryTimeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => {
       output = (output + chunk.toString("utf8")).slice(-outputLimit);
     });
@@ -183,6 +188,14 @@ export async function readAutoDevices(
     child.once("error", reject);
     child.once("close", (code) => {
       clearTimeout(timer);
+      if (timedOut) {
+        reject(
+          new Error(
+            "GPU discovery timed out while Metal was starting. Restart osAi and try again.",
+          ),
+        );
+        return;
+      }
       if (code !== 0) {
         reject(new Error(error.trim().slice(-500) || "GPU discovery failed"));
         return;
