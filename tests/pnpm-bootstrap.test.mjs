@@ -46,7 +46,16 @@ test("native release entry points use the shared pnpm bootstrap", async () => {
     const source = await fs.readFile(path.join(root, relative), "utf8");
     assert.match(source, /run-pnpm\.mjs/, relative);
     if (relative === "releaseScripts/macos/build.sh") {
-      assert.match(source, /CI=true[\s\S]+install --frozen-lockfile/, relative);
+      assert.match(
+        source,
+        /export CI=true[\s\S]+install --frozen-lockfile/,
+        relative,
+      );
+      assert.match(
+        source,
+        /export CI=true[\s\S]+run release:build:macos/,
+        relative,
+      );
     }
     if (relative === "releaseScripts/windows/build-windows.sh") {
       assert.match(source, /run-pnpm\.mjs" exec electron-builder --win/);
