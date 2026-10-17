@@ -1912,13 +1912,11 @@ export function App() {
                   type="button"
                   className={workflowStep === index ? "active" : ""}
                   aria-current={workflowStep === index ? "step" : undefined}
-                  aria-label={
-                    index === 0 ? "Session" : `Step ${index} of 4: ${label}`
-                  }
+                  aria-label={`Step ${index + 1} of ${workflowLabels.length}: ${label}`}
                   disabled={index > unlockedStep || starting || calibrationBusy}
                   onClick={() => goToWorkflowStep(index)}
                 >
-                  <span>{index === 0 ? "•" : index}</span>
+                  <span aria-hidden="true">{index + 1}</span>
                   {index === 1
                     ? "Model"
                     : index === 3

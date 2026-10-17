@@ -22,6 +22,16 @@ test("session tabs expose confirmed restart and delete actions through the safe 
   assert.match(main, /shell\.trashItem/);
 });
 
+test("training setup tabs use a consistent one-through-five sequence", async () => {
+  const app = await fs.readFile("src/App.tsx", "utf8");
+  assert.match(
+    app,
+    /aria-label={`Step \${index \+ 1} of \${workflowLabels\.length}: \${label}`}/,
+  );
+  assert.match(app, /<span aria-hidden="true">\{index \+ 1\}<\/span>/);
+  assert.doesNotMatch(app, /index === 0 \? "•" : index/);
+});
+
 test("notifications reveal complete cleaned error details", async () => {
   const app = await fs.readFile("src/App.tsx", "utf8");
   assert.match(app, /function readableError/);
