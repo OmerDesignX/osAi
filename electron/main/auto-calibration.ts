@@ -18,7 +18,7 @@ export function autoCalibrationArgs(input: TrainingRequest) {
     throw new Error("Invalid calibration optimizer");
   const args = [
     "calibrate",
-    ...autoBenchmarkArgs(input).slice(2),
+    ...autoBenchmarkArgs(input).slice(1),
     "--data",
     path.resolve(input.fineTuneData),
     "--optimizer",

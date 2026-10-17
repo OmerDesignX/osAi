@@ -57,6 +57,8 @@ test("GPU inventory retains free and total memory by native device ID", () => {
 test("calibration uses the selected dataset, devices and context mode", () => {
   const args = autoCalibrationArgs(request);
   assert.equal(args[0], "calibrate");
+  assert.equal(args[args.indexOf("--tier") + 1], request.tier);
+  assert.equal(args[args.indexOf("--model-version") + 1], request.modelVersion);
   assert.deepEqual(
     args.slice(args.indexOf("--data"), args.indexOf("--optimizer")),
     ["--data", request.fineTuneData],
@@ -69,6 +71,24 @@ test("calibration uses the selected dataset, devices and context mode", () => {
       "--full-content-context",
     ),
     true,
+  );
+});
+
+test("calibration preserves custom model selection", () => {
+  const customModelFolder = path.resolve("test-fixtures", "custom-model");
+  const args = autoCalibrationArgs({
+    ...request,
+    modelSource: "custom",
+    customModelFolder,
+  });
+  assert.equal(args.includes("--tier"), false);
+  assert.equal(
+    args[args.indexOf("--custom") + 1],
+    path.basename(customModelFolder),
+  );
+  assert.equal(
+    args[args.indexOf("--custom-root") + 1],
+    path.dirname(customModelFolder),
   );
 });
 
