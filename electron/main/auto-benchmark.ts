@@ -97,6 +97,34 @@ export function validateAutoBenchmarkResult(
   return result;
 }
 
+export function validateAutoDeviceInventory(
+  value: unknown,
+): AutoDeviceInventory {
+  const result = value as Partial<AutoDeviceInventory> | null;
+  const validMemoryMap = (memory: unknown) =>
+    memory === undefined ||
+    (typeof memory === "object" &&
+      memory !== null &&
+      Object.values(memory).every(
+        (amount) =>
+          typeof amount === "number" && Number.isFinite(amount) && amount > 0,
+      ));
+  if (
+    typeof result?.accelerator !== "string" ||
+    !Array.isArray(result.devices) ||
+    result.devices.some((device) => typeof device !== "string" || !device) ||
+    !validMemoryMap(result.free_bytes) ||
+    !validMemoryMap(result.total_bytes)
+  )
+    throw new Error("Invalid GPU inventory");
+  return {
+    accelerator: result.accelerator,
+    devices: result.devices,
+    free_bytes: result.free_bytes ?? {},
+    total_bytes: result.total_bytes ?? {},
+  };
+}
+
 export async function runAutoBenchmark(
   executable: string,
   input: TrainingRequest,
@@ -201,21 +229,7 @@ export async function readAutoDevices(
         return;
       }
       try {
-        const result = JSON.parse(output) as {
-          accelerator: string;
-          devices: string[];
-          free_bytes?: Record<string, number>;
-        };
-        if (
-          !Array.isArray(result.devices) ||
-          (result.free_bytes !== undefined &&
-            (typeof result.free_bytes !== "object" ||
-              Object.values(result.free_bytes).some(
-                (value) => !Number.isFinite(value) || value <= 0,
-              )))
-        )
-          throw new Error("Invalid GPU inventory");
-        resolve({ ...result, free_bytes: result.free_bytes ?? {} });
+        resolve(validateAutoDeviceInventory(JSON.parse(output)));
       } catch (failure) {
         reject(failure);
       }

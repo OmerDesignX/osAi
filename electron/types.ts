@@ -163,6 +163,7 @@ export type AutoDeviceInventory = {
   accelerator: string;
   devices: string[];
   free_bytes: Record<string, number>;
+  total_bytes: Record<string, number>;
 };
 
 export type SessionArtifacts = {

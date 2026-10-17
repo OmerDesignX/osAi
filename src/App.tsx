@@ -919,6 +919,7 @@ export function App() {
               JSON.stringify({
                 accelerator: inventory.accelerator,
                 devices: inventory.devices,
+                totalBytes: inventory.total_bytes,
               }),
             );
           }
@@ -2101,8 +2102,8 @@ export function App() {
                           {benchmarkDevices.join(" + ")}.
                           {benchmarkPlan &&
                           benchmarkDevices[benchmarkPlan.mainGpu]
-                            ? ` ${benchmarkDevices[benchmarkPlan.mainGpu]} has the most available memory and will hold shared buffers.`
-                            : " osAi will place shared buffers on the card with the most available memory."}
+                            ? ` ${benchmarkDevices[benchmarkPlan.mainGpu]} has the largest physical memory capacity and will hold shared buffers.`
+                            : " osAi will place shared buffers on the card with the largest reported memory capacity."}
                         </span>
                       </div>
                     ) : capacityDevices.length > 1 ? (

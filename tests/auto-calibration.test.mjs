@@ -5,8 +5,11 @@ import {
   autoCalibrationArgs,
   validateAutoCalibrationResult,
 } from "../dist-electron/main/auto-calibration.js";
-import { validateAutoBenchmarkResult } from "../dist-electron/main/auto-benchmark.js";
-import { autoBenchmarkArgs } from "../dist-electron/main/auto-benchmark.js";
+import {
+  autoBenchmarkArgs,
+  validateAutoBenchmarkResult,
+  validateAutoDeviceInventory,
+} from "../dist-electron/main/auto-benchmark.js";
 import { calibrationKey } from "../dist-electron/calibration-key.js";
 
 const request = {
@@ -33,6 +36,23 @@ const request = {
   mainGpu: null,
   distributedWorkers: null,
 };
+
+test("GPU inventory retains free and total memory by native device ID", () => {
+  assert.deepEqual(
+    validateAutoDeviceInventory({
+      accelerator: "metal",
+      devices: ["MTL0", "MTL1"],
+      free_bytes: { MTL0: 3 * 1024 ** 3, MTL1: 6 * 1024 ** 3 },
+      total_bytes: { MTL0: 4 * 1024 ** 3, MTL1: 8 * 1024 ** 3 },
+    }),
+    {
+      accelerator: "metal",
+      devices: ["MTL0", "MTL1"],
+      free_bytes: { MTL0: 3 * 1024 ** 3, MTL1: 6 * 1024 ** 3 },
+      total_bytes: { MTL0: 4 * 1024 ** 3, MTL1: 8 * 1024 ** 3 },
+    },
+  );
+});
 
 test("calibration uses the selected dataset, devices and context mode", () => {
   const args = autoCalibrationArgs(request);
