@@ -62,5 +62,5 @@ test("macOS leaves physical Metal device selection to the training backend", asy
 });
 
 test("slow Intel Metal discovery is not killed during shader startup", () => {
-  assert.ok(autoDeviceDiscoveryTimeoutMs >= 90_000);
+  assert.ok(autoDeviceDiscoveryTimeoutMs >= 16 * 60_000);
 });

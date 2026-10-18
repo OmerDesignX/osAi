@@ -10,7 +10,10 @@ import { backendRuntimeEnvironment } from "./backend-source.js";
 
 const outputLimit = 64 * 1024;
 const benchmarkTimeoutMs = 60 * 60 * 1_000;
-export const autoDeviceDiscoveryTimeoutMs = 120_000;
+// The CLI allows legacy multi-GPU Metal drivers up to 15 minutes for their
+// first shader warmup. Keep the app wrapper slightly longer so the CLI can
+// return its own bounded diagnostic instead of being killed first.
+export const autoDeviceDiscoveryTimeoutMs = 16 * 60_000;
 let active: ChildProcess | null = null;
 
 export function autoBenchmarkArgs(input: TrainingRequest) {
