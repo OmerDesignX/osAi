@@ -478,6 +478,56 @@ function registerIpc() {
     if (typeof id !== "string") throw new Error("Invalid training session");
     return sessionService.stop(id);
   });
+  ipcMain.handle("training:force-stop", async (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Invalid training session");
+    const state = await sessionService.find(id);
+    if (state.status !== "stopping")
+      throw new Error("Request a safe stop before using Stop now");
+
+    const checkpointCandidates = [
+      state.checkpointModelPath,
+      state.resumeCheckpointPath,
+      state.checkpointPath,
+    ].filter((value): value is string => Boolean(value));
+    const checkpointExists = (
+      await Promise.all(
+        checkpointCandidates.map((candidate) =>
+          fs.stat(candidate).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      )
+    ).some(Boolean);
+    const checkpointSaved =
+      state.checkpointStatus === "saved" && checkpointExists;
+
+    const confirmation = await dialog.showMessageBox(mainWindow!, {
+      type: "warning",
+      title: "Stop training now?",
+      message: checkpointSaved
+        ? "A checkpoint has been saved. Stop now?"
+        : "The checkpoint is still being saved. Stop now without it?",
+      detail: checkpointSaved
+        ? "The trainer will be terminated immediately. You can resume from the verified saved checkpoint."
+        : "Stopping immediately can lose work since the latest checkpoint is not yet verified.",
+      buttons: checkpointSaved
+        ? ["Keep training", "Stop now"]
+        : ["Keep saving", "Stop without checkpoint"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (confirmation.response !== 1) return state;
+
+    await stopSessionTrainers(state.sessionDirectory, true);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const refreshed = await sessionService.find(id);
+      if (refreshed.status !== "stopping") return refreshed;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return sessionService.find(id);
+  });
   ipcMain.handle(
     "training:restart",
     async (_event, id: unknown, value: unknown) => {

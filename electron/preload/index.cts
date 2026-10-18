@@ -63,6 +63,8 @@ const bridge: OsAiBridge = {
   setAutoStop: (id: string, enabled: boolean) =>
     ipcRenderer.invoke("training:auto-stop", id, enabled),
   stopTraining: (id: string) => ipcRenderer.invoke("training:stop", id),
+  forceStopTraining: (id: string) =>
+    ipcRenderer.invoke("training:force-stop", id),
   restartSession: (id: string, value: TrainingRequest) =>
     ipcRenderer.invoke("training:restart", id, value),
   deleteSession: (id: string) => ipcRenderer.invoke("training:delete", id),

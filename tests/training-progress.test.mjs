@@ -12,6 +12,15 @@ test("shows the trainer's exact percentage instead of the pipeline's five-percen
     displayedSessionProgress({
       phase: "fine-tuning",
       progress: 5,
+      trainingPercent: 0.001,
+      indeterminate: false,
+    }),
+    { percent: 0.001, label: "<0.01%" },
+  );
+  assert.deepEqual(
+    displayedSessionProgress({
+      phase: "fine-tuning",
+      progress: 5,
       trainingPercent: 0.07,
       indeterminate: false,
     }),

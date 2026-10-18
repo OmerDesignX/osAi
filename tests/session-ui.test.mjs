@@ -22,6 +22,25 @@ test("session tabs expose confirmed restart and delete actions through the safe 
   assert.match(main, /shell\.trashItem/);
 });
 
+test("safe stop saves first and Stop now requires explicit confirmation", async () => {
+  const [app, preload, main, service, styles] = await Promise.all([
+    fs.readFile("src/App.tsx", "utf8"),
+    fs.readFile("electron/preload/index.cts", "utf8"),
+    fs.readFile("electron/main/index.ts", "utf8"),
+    fs.readFile("electron/main/session-service.ts", "utf8"),
+    fs.readFile("src/styles.css", "utf8"),
+  ]);
+  assert.match(app, /window\.osai\.forceStopTraining/);
+  assert.match(app, /Saving checkpoint, then stopping…/);
+  assert.match(app, /\? "Stop now"/);
+  assert.match(preload, /forceStopTraining:[\s\S]*?training:force-stop/);
+  assert.match(main, /A checkpoint has been saved\. Stop now\?/);
+  assert.match(main, /Stop without checkpoint/);
+  assert.match(main, /stopSessionTrainers\(state\.sessionDirectory, true\)/);
+  assert.match(service, /Saving checkpoint, then stopping…/);
+  assert.match(styles, /\.stop-state-message\s*\{/);
+});
+
 test("training setup tabs use a consistent one-through-five sequence", async () => {
   const app = await fs.readFile("src/App.tsx", "utf8");
   assert.match(

@@ -505,7 +505,7 @@ export function App() {
   const [starting, setStarting] = useState(false);
   const [autoStopBusy, setAutoStopBusy] = useState(false);
   const [sessionControl, setSessionControl] = useState<
-    "" | "pausing" | "resuming" | "saving" | "stopping"
+    "" | "pausing" | "resuming" | "saving" | "stopping" | "forcing"
   >("");
   const [showLogLatest, setShowLogLatest] = useState(false);
   const [wikiOpen, setWikiOpen] = useState(false);
@@ -1403,9 +1403,11 @@ export function App() {
 
   const stopTraining = async (id: string) => {
     setNotice("");
-    setSessionControl("stopping");
+    const force = active?.id === id && active.status === "stopping";
+    setSessionControl(force ? "forcing" : "stopping");
     try {
-      await window.osai.stopTraining(id);
+      if (force) await window.osai.forceStopTraining(id);
+      else await window.osai.stopTraining(id);
       await refreshSessions();
     } catch (error) {
       setNotice(readableError(error));
@@ -3452,6 +3454,14 @@ export function App() {
             <footer className="panel-footer">
               {active ? (
                 <div className="active-run-controls">
+                  {active.status === "stopping" && (
+                    <div className="stop-state-message" role="status">
+                      <Icon name="save" />
+                      <span>
+                        {active.message || "Saving checkpoint, then stopping…"}
+                      </span>
+                    </div>
+                  )}
                   {(active.status === "running" ||
                     active.status === "pausing" ||
                     active.status === "stopping") && (
@@ -3532,13 +3542,20 @@ export function App() {
                     onClick={() => void stopTraining(active.id)}
                   >
                     <Icon
-                      name={sessionControl === "stopping" ? "loader" : "square"}
+                      name={
+                        sessionControl === "stopping" ||
+                        sessionControl === "forcing"
+                          ? "loader"
+                          : "square"
+                      }
                     />
-                    {sessionControl === "stopping"
-                      ? "Stopping…"
-                      : active.status === "stopping"
-                        ? "Stop now"
-                        : "Stop training"}
+                    {sessionControl === "forcing"
+                      ? "Stopping now…"
+                      : sessionControl === "stopping"
+                        ? "Saving checkpoint…"
+                        : active.status === "stopping"
+                          ? "Stop now"
+                          : "Stop training"}
                   </button>
                 </div>
               ) : workflowStep < 4 ? (

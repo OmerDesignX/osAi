@@ -1,6 +1,6 @@
 {
   "name": "osai-app",
-  "version": "0.1.86",
+  "version": "1.87.0",
   "description": "A local desktop training controller for osAi",
   "main": "dist-electron/main/index.js",
   "author": "osAi contributors",

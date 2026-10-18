@@ -117,7 +117,7 @@ function isRunning(pid: number) {
   }
 }
 
-export async function terminateProcessTree(pid: number) {
+export async function terminateProcessTree(pid: number, force = false) {
   if (!Number.isSafeInteger(pid) || pid < 1 || pid === process.pid)
     throw new Error("Invalid training process");
   if (!isRunning(pid)) return;
@@ -127,6 +127,12 @@ export async function terminateProcessTree(pid: number) {
         if (isRunning(pid)) throw error;
       },
     );
+  } else if (force) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch (error) {
+      if (isRunning(pid)) throw error;
+    }
   } else {
     try {
       process.kill(pid, "SIGTERM");
@@ -145,7 +151,10 @@ export async function terminateProcessTree(pid: number) {
     throw new Error("Training process " + pid + " did not stop");
 }
 
-export async function stopSessionTrainers(sessionDirectory: string) {
+export async function stopSessionTrainers(
+  sessionDirectory: string,
+  force = false,
+) {
   const processes = await listTrainingProcesses();
   const pids = sessionTrainerPids(processes, sessionDirectory);
   if (pids.length > 64)
@@ -157,7 +166,7 @@ export async function stopSessionTrainers(sessionDirectory: string) {
       sessionDirectory,
     );
     if (!current.includes(pid)) continue;
-    await terminateProcessTree(pid);
+    await terminateProcessTree(pid, force);
     stopped += 1;
   }
   return stopped;

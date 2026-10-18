@@ -12,8 +12,13 @@ export function displayedSessionProgress(state: ProgressState) {
     if (percent === undefined || !Number.isFinite(percent))
       return { percent: null, label: "Working" };
     const exact = Math.max(0, Math.min(100, percent));
-    return { percent: exact, label: `${exact.toFixed(2)}%` };
+    return { percent: exact, label: formatTrainingPercent(exact) };
   }
   const progress = Math.max(0, Math.min(100, state.progress));
   return { percent: progress, label: `${progress.toFixed(1)}%` };
+}
+
+export function formatTrainingPercent(percent: number) {
+  const exact = Math.max(0, Math.min(100, percent));
+  return exact > 0 && exact < 0.01 ? "<0.01%" : `${exact.toFixed(2)}%`;
 }

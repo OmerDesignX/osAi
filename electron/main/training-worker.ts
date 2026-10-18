@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { SessionState, WorkerJob } from "../types.js";
+import { formatTrainingPercent } from "../session-progress.js";
 import { backendRuntimeEnvironment } from "./backend-source.js";
 import { LossRiseDetector } from "./auto-stop.js";
 import {
@@ -414,13 +415,13 @@ function consumeLine(raw: string) {
       state.progress = clamp(
         phaseProgress(completed, total, "fine-tuning", job.stage),
       );
-      const percentComplete = ((100 * completed) / Math.max(1, total)).toFixed(
-        2,
+      const percentComplete = formatTrainingPercent(
+        (100 * completed) / Math.max(1, total),
       );
       if (!autoStopGeneration)
         state.message =
           `Fine-tuning: ${completed.toLocaleString()} of ${total.toLocaleString()} ` +
-          `(${percentComplete}%)`;
+          `(${percentComplete})`;
     } else if (lower.includes("publish") || lower.includes("fusion")) {
       state.phase = "publishing";
       state.indeterminate = true;
@@ -794,9 +795,7 @@ async function terminateTree() {
     ? autoStoppedAtPriorCheckpoint
       ? "Auto stop is stopping training with the previous saved checkpoint"
       : "Auto stop saved a checkpoint and is stopping training"
-    : supportsExactStop()
-      ? "Saving an exact resume checkpoint at the next completed record"
-      : "Saving an adapter and merged model before stopping";
+    : "Saving checkpoint, then stopping…";
   await scheduleStateWrite(true);
   if (!child?.pid) return;
   const stoppedWhilePaused =

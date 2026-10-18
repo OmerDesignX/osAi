@@ -63,3 +63,31 @@ test("stops a selected subprocess without ending the controller", async () => {
     if (child.exitCode === null) child.kill("SIGKILL");
   }
 });
+
+test("force stop immediately terminates only the selected subprocess", async () => {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+    await terminateProcessTree(child.pid, true);
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("The force-stopped subprocess did not exit")),
+          2_000,
+        );
+        child.once("exit", () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
+    }
+    assert.ok(child.exitCode !== null || child.signalCode !== null);
+  } finally {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
+});

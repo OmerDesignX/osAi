@@ -1438,7 +1438,7 @@ export class SessionService {
         if (error.code !== "EEXIST") throw error;
       });
     state.status = "stopping";
-    state.message = "Saving at the next safe training record";
+    state.message = "Saving checkpoint, then stopping…";
     await writePrivateJson(
       path.join(state.sessionDirectory, "state.json"),
       state,
