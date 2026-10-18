@@ -1231,6 +1231,7 @@ export class SessionService {
       statePath: path.join(directory, "state.json"),
       logPath: path.join(directory, "training.log"),
       stopPath: path.join(directory, "stop.request"),
+      forceStopPath: path.join(directory, "force-stop.request"),
       pausePath: path.join(directory, "pause.request"),
       resumePath: path.join(directory, "resume.request"),
       checkpointRequestPath: path.join(directory, "checkpoint.request"),
@@ -1522,6 +1523,10 @@ export class SessionService {
       );
     }
     await fs.rm(job.stopPath, { force: true });
+    await fs.rm(
+      job.forceStopPath || path.join(directory, "force-stop.request"),
+      { force: true },
+    );
     await fs.rm(job.pausePath || path.join(directory, "pause.request"), {
       force: true,
     });

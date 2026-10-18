@@ -181,6 +181,7 @@ export type WorkerJob = {
   statePath: string;
   logPath: string;
   stopPath: string;
+  forceStopPath?: string;
   pausePath?: string;
   resumePath?: string;
   checkpointRequestPath?: string;

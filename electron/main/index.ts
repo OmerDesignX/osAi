@@ -27,7 +27,10 @@ import {
 } from "./auto-calibration.js";
 import { readPreferences, writePreferences } from "./preferences.js";
 import { SessionService } from "./session-service.js";
-import { stopSessionTrainers } from "./session-processes.js";
+import {
+  stopSessionTrainers,
+  terminateProcessTree,
+} from "./session-processes.js";
 import {
   datasetTrainingSummary,
   inspectDataset,
@@ -520,8 +523,21 @@ function registerIpc() {
     });
     if (confirmation.response !== 1) return state;
 
-    await stopSessionTrainers(state.sessionDirectory, true);
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    const forceStopPath = path.join(
+      state.sessionDirectory,
+      "force-stop.request",
+    );
+    const pendingForceStop = `${forceStopPath}.${process.pid}.pending`;
+    await fs.writeFile(pendingForceStop, "stop-now\n", { mode: 0o600 });
+    await fs.rename(pendingForceStop, forceStopPath);
+    if (state.processPid) {
+      await terminateProcessTree(state.processPid, true, true).catch(
+        async () => stopSessionTrainers(state.sessionDirectory, true),
+      );
+    } else {
+      await stopSessionTrainers(state.sessionDirectory, true);
+    }
+    for (let attempt = 0; attempt < 50; attempt += 1) {
       const refreshed = await sessionService.find(id);
       if (refreshed.status !== "stopping") return refreshed;
       await new Promise((resolve) => setTimeout(resolve, 100));

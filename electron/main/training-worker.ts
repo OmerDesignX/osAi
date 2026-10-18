@@ -726,7 +726,13 @@ async function checkControlRequests() {
     job.pausePath || path.join(job.sessionDirectory, "pause.request");
   const resumePath =
     job.resumePath || path.join(job.sessionDirectory, "resume.request");
+  const forceStopPath =
+    job.forceStopPath || path.join(job.sessionDirectory, "force-stop.request");
   try {
+    if (await exists(forceStopPath)) {
+      await forceTerminateTree();
+      return;
+    }
     if (await exists(job.stopPath)) {
       await terminateTree();
       return;
@@ -833,6 +839,19 @@ async function terminateTree() {
   stopTimer.unref();
 }
 
+async function forceTerminateTree() {
+  if (finalised || child?.exitCode !== null) return;
+  stopping = true;
+  legacyStop = true;
+  pauseGeneration = "";
+  if (stopTimer) clearTimeout(stopTimer);
+  state.status = "stopping";
+  state.indeterminate = false;
+  state.message = "Stopping training immediately";
+  await scheduleStateWrite(true);
+  await killTree(true);
+}
+
 async function forceStopAfterTimeout() {
   if (!child?.pid || child.exitCode !== null || finalised) return;
   forcedStop = true;
@@ -842,7 +861,7 @@ async function forceStopAfterTimeout() {
   await killTree();
 }
 
-async function killTree() {
+async function killTree(force = false) {
   if (!child?.pid || child.exitCode !== null || finalised) return;
   if (process.platform === "win32") {
     const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
@@ -867,6 +886,12 @@ async function killTree() {
       timer.unref();
     });
     if (code !== 0 || child.exitCode === null) {
+      child.kill("SIGKILL");
+    }
+  } else if (force) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
       child.kill("SIGKILL");
     }
   } else {
@@ -1030,10 +1055,14 @@ async function main() {
       complete("failed", null, error.message);
     });
     child?.once("close", async (code, signal) => {
-      const stopRequested = stopping || (await exists(job.stopPath));
+      const forceStopPath =
+        job.forceStopPath || path.join(job.sessionDirectory, "force-stop.request");
+      const forceRequested = await exists(forceStopPath);
+      const stopRequested =
+        stopping || forceRequested || (await exists(job.stopPath));
       const status = forcedStop
         ? "failed"
-        : stopRequested && (code === 0 || legacyStop)
+        : stopRequested && (code === 0 || legacyStop || forceRequested)
           ? "stopped"
           : code === 0
             ? "completed"

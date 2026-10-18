@@ -36,7 +36,8 @@ test("safe stop saves first and Stop now requires explicit confirmation", async 
   assert.match(preload, /forceStopTraining:[\s\S]*?training:force-stop/);
   assert.match(main, /A checkpoint has been saved\. Stop now\?/);
   assert.match(main, /Stop without checkpoint/);
-  assert.match(main, /stopSessionTrainers\(state\.sessionDirectory, true\)/);
+  assert.match(main, /force-stop\.request/);
+  assert.match(main, /terminateProcessTree\(state\.processPid, true, true\)/);
   assert.match(service, /Saving checkpoint, then stopping…/);
   assert.match(styles, /\.stop-state-message\s*\{/);
 });

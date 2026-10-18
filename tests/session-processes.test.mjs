@@ -91,3 +91,26 @@ test("force stop immediately terminates only the selected subprocess", async () 
     if (child.exitCode === null) child.kill("SIGKILL");
   }
 });
+
+test(
+  "force stop terminates the detached trainer process group",
+  { skip: process.platform === "win32" },
+  async () => {
+    const child = spawn(
+      process.execPath,
+      ["-e", "require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});setInterval(()=>{},1000)"],
+      { detached: true, stdio: "ignore" },
+    );
+    try {
+      await new Promise((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
+      await terminateProcessTree(child.pid, true, true);
+      assert.equal(child.signalCode, "SIGKILL");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null)
+        process.kill(-child.pid, "SIGKILL");
+    }
+  },
+);

@@ -117,7 +117,11 @@ function isRunning(pid: number) {
   }
 }
 
-export async function terminateProcessTree(pid: number, force = false) {
+export async function terminateProcessTree(
+  pid: number,
+  force = false,
+  processGroup = false,
+) {
   if (!Number.isSafeInteger(pid) || pid < 1 || pid === process.pid)
     throw new Error("Invalid training process");
   if (!isRunning(pid)) return;
@@ -129,9 +133,17 @@ export async function terminateProcessTree(pid: number, force = false) {
     );
   } else if (force) {
     try {
-      process.kill(pid, "SIGKILL");
+      process.kill(processGroup ? -pid : pid, "SIGKILL");
     } catch (error) {
-      if (isRunning(pid)) throw error;
+      if (processGroup) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch (fallbackError) {
+          if (isRunning(pid)) throw fallbackError;
+        }
+      } else if (isRunning(pid)) {
+        throw error;
+      }
     }
   } else {
     try {
@@ -144,7 +156,11 @@ export async function terminateProcessTree(pid: number, force = false) {
   while (isRunning(pid) && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 100));
   if (isRunning(pid) && process.platform !== "win32") {
-    process.kill(pid, "SIGKILL");
+    try {
+      process.kill(processGroup ? -pid : pid, "SIGKILL");
+    } catch {
+      process.kill(pid, "SIGKILL");
+    }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   if (isRunning(pid))
