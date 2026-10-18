@@ -98,7 +98,10 @@ test(
   async () => {
     const child = spawn(
       process.execPath,
-      ["-e", "require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});setInterval(()=>{},1000)"],
+      [
+        "-e",
+        "require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});setInterval(()=>{},1000)",
+      ],
       { detached: true, stdio: "ignore" },
     );
     try {

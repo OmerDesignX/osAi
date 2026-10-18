@@ -531,8 +531,8 @@ function registerIpc() {
     await fs.writeFile(pendingForceStop, "stop-now\n", { mode: 0o600 });
     await fs.rename(pendingForceStop, forceStopPath);
     if (state.processPid) {
-      await terminateProcessTree(state.processPid, true, true).catch(
-        async () => stopSessionTrainers(state.sessionDirectory, true),
+      await terminateProcessTree(state.processPid, true, true).catch(async () =>
+        stopSessionTrainers(state.sessionDirectory, true),
       );
     } else {
       await stopSessionTrainers(state.sessionDirectory, true);

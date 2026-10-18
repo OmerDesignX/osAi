@@ -1056,7 +1056,8 @@ async function main() {
     });
     child?.once("close", async (code, signal) => {
       const forceStopPath =
-        job.forceStopPath || path.join(job.sessionDirectory, "force-stop.request");
+        job.forceStopPath ||
+        path.join(job.sessionDirectory, "force-stop.request");
       const forceRequested = await exists(forceStopPath);
       const stopRequested =
         stopping || forceRequested || (await exists(job.stopPath));
